@@ -99,6 +99,37 @@ describe('Context Overrides', () => {
     expect(result.ecs.enableEcsExec).toBe(baseConfig.ecs.enableEcsExec);
   });
 
+  test('handles NaN number parsing', () => {
+    app.node.setContext('taskCpu', NaN);
+    
+    const result = applyContextOverrides(app, baseConfig);
+    
+    // NaN values should fallback to base config
+    expect(result.ecs.taskCpu).toBe(baseConfig.ecs.taskCpu);
+  });
+
+  test('handles object and array boolean parsing', () => {
+    app.node.setContext('enableEcsExec', {});
+    app.node.setContext('usePreBuiltImages', []);
+    
+    const result = applyContextOverrides(app, baseConfig);
+    
+    // Object/array values should fallback to base config
+    expect(result.ecs.enableEcsExec).toBe(baseConfig.ecs.enableEcsExec);
+    expect(result.docker.usePreBuiltImages).toBe(baseConfig.docker.usePreBuiltImages);
+  });
+
+  test('handles null and undefined context values', () => {
+    app.node.setContext('taskCpu', null);
+    app.node.setContext('enableEcsExec', null);
+    
+    const result = applyContextOverrides(app, baseConfig);
+    
+    // Null values should fallback to base config
+    expect(result.ecs.taskCpu).toBe(baseConfig.ecs.taskCpu);
+    expect(result.ecs.enableEcsExec).toBe(baseConfig.ecs.enableEcsExec);
+  });
+
   test('overrides docker configuration', () => {
     app.node.setContext('imageTag', 'v1.2.3');
     app.node.setContext('removalPolicy', 'RETAIN');

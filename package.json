@@ -6,16 +6,19 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:unit": "jest test/unit",
+    "test": "node --max-old-space-size=2048 ./node_modules/.bin/jest",
+    "test:watch": "node --max-old-space-size=2048 ./node_modules/.bin/jest --watch",
+    "test:coverage": "node --max-old-space-size=2048 ./node_modules/.bin/jest --coverage",
+    "test:unit": "node --max-old-space-size=2048 ./node_modules/.bin/jest test/unit",
     "cdk": "cdk",
-    "deploy": "cdk deploy --context envType=dev-test",
-    "deploy:prod": "cdk deploy --context envType=prod",
+    "deploy": "npm run clean:assets && cdk deploy --context envType=dev-test",
+    "deploy:prod": "npm run clean:assets && cdk deploy --context envType=prod",
     "destroy": "cdk destroy",
-    "diff": "cdk diff",
-    "synth": "cdk synth"
+    "diff": "npm run clean:assets && cdk diff",
+    "synth": "npm run clean:assets && cdk synth",
+    "clean:assets": "rm -rf cdk.out",
+    "clean:all": "npm run clean:assets && rm -rf node_modules coverage",
+    "kill:node": "pkill -f node || true"
   },
   "devDependencies": {
     "@types/jest": "^29.5.5",
