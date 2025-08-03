@@ -56,12 +56,38 @@ https://utils.tak.nz/ais-proxy/ws.php?username=your-api-key&latmin=-48&latmax=-3
 }
 ```
 
+### Get Ship Photo
+```
+GET /ais-proxy/ship-photo/{mmsi}
+```
+
+**Parameters:**
+- `mmsi` - Maritime Mobile Service Identity number
+
+**Example:**
+```bash
+# Get photo for vessel with MMSI 512007405
+https://utils.tak.nz/ais-proxy/ship-photo/512007405
+```
+
+**Response:**
+- **Content-Type**: `image/jpeg`
+- **Cache-Control**: `public, max-age=86400` (24 hours for cached photos)
+- **Body**: JPEG image data
+
+**Features:**
+- **90-day cache**: Photos cached in EFS for 90 days
+- **Automatic updates**: Daily check for updated photos using Last-Modified headers
+- **Fallback**: Serves "No Photo" placeholder image if vessel photo unavailable
+- **Background caching**: Photos cached automatically when vessels are looked up
+- **Rate limiting**: Respects VesselFinder API with 1-second delays between requests
+
 ### Health Check
 ```
 GET /ais-proxy/health
 ```
 
-Returns service status and configuration information.
+Returns service status and configuration information including photo cache statistics.
 
 ## Rate Limiting
 - **IP-based**: 600 requests per minute per IP address (default)
@@ -147,10 +173,12 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 - **Coverage**: New Zealand waters (configurable bounding box)
 - **Caching**: Vessel data cached in memory with 1-hour expiration
 - **Persistence**: Cache persisted to disk for service restarts
+- **Photo Cache**: Ship photos cached in EFS for 90 days with daily updates
 - **Compatibility**: AISHub-compatible API format (vessels only, no navigation aids)
 - **WebSocket**: Maintains persistent connection to AISStream
 - **Reconnection**: Automatic reconnection on connection loss
 - **Filtering**: Navigation aids are automatically filtered out to maintain AISHub compatibility
+- **Photo Source**: VesselFinder API for ship photos with automatic fallback
 
 ## Data Fields
 

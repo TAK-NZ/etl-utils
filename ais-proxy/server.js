@@ -10,6 +10,8 @@ const CONFIG_BUCKET = process.env.CONFIG_BUCKET;
 const CONFIG_KEY = process.env.CONFIG_KEY || 'ETL-Util-AIS-Proxy-Api-Keys.json';
 const DEBUG = process.env.DEBUG === 'true';
 const CACHE_FILE = '/data/vessel-cache.json';
+const PHOTO_CACHE_DIR = '/data/photos';
+const PHOTO_CACHE_INDEX = '/data/photo-cache.json';
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'ap-southeast-2' });
 
@@ -20,8 +22,16 @@ const rateLimitCache = new Map();
 const nameLookupQueue = [];
 let nameLookupInProgress = false;
 
+// Photo cache
+const photoCache = new Map(); // mmsi -> { filename, downloadedAt, lastModified, picId }
+const photoUpdateQueue = [];
+let photoUpdateInProgress = false;
+
 const RATE_LIMIT_PER_MINUTE = 600;
 const NAME_LOOKUP_DELAY = 2000; // 2 seconds between lookups
+const PHOTO_CACHE_DAYS = 90;
+const PHOTO_UPDATE_DELAY = 1000; // 1 second between photo downloads
+const PHOTO_UPDATE_BATCH_SIZE = 50; // Process 50 photos per batch to spread over 24h
 
 // Load API keys from S3
 async function loadApiKeys() {
@@ -318,6 +328,210 @@ const VESSEL_TYPE_MAPPING = {
 // Track unknown vessel types for future mapping
 const unknownVesselTypes = new Set();
 
+// Initialize photo cache directory
+function initPhotoCache() {
+  try {
+    fs.mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+  } catch (error) {
+    console.warn('Failed to create photo cache directory:', error.message);
+  }
+}
+
+// Load photo cache index
+function loadPhotoCache() {
+  try {
+    if (fs.existsSync(PHOTO_CACHE_INDEX)) {
+      const data = fs.readFileSync(PHOTO_CACHE_INDEX, 'utf8');
+      const cached = JSON.parse(data);
+      
+      for (const [mmsi, photoInfo] of Object.entries(cached)) {
+        photoInfo.downloadedAt = new Date(photoInfo.downloadedAt);
+        if (photoInfo.lastModified) {
+          photoInfo.lastModified = new Date(photoInfo.lastModified);
+        }
+        photoCache.set(parseInt(mmsi), photoInfo);
+      }
+      
+      console.log(`Loaded ${photoCache.size} photo cache entries`);
+    }
+  } catch (error) {
+    console.warn('Failed to load photo cache:', error.message);
+  }
+}
+
+// Save photo cache index
+function savePhotoCache() {
+  try {
+    const cacheObj = Object.fromEntries(photoCache);
+    fs.writeFileSync(PHOTO_CACHE_INDEX, JSON.stringify(cacheObj));
+  } catch (error) {
+    console.warn('Failed to save photo cache:', error.message);
+  }
+}
+
+// Get placeholder image path
+function getPlaceholderImagePath() {
+  return path.join(path.dirname(new URL(import.meta.url).pathname), 'static', 'novessel.png');
+}
+
+// Download vessel photo from VesselFinder
+async function downloadVesselPhoto(mmsi, picId) {
+  try {
+    const photoUrl = `https://static.vesselfinder.net/ship-photo/${picId}/1`;
+    const response = await fetch(photoUrl, {
+      timeout: 10000,
+      headers: { 'User-Agent': 'AIS-Proxy/1.0' }
+    });
+    
+    if (!response.ok) {
+      if (DEBUG) console.log(`Photo not found for MMSI ${mmsi}: ${response.status}`);
+      return null;
+    }
+    
+    const lastModified = response.headers.get('last-modified');
+    const buffer = await response.arrayBuffer();
+    
+    return {
+      data: Buffer.from(buffer),
+      lastModified: lastModified ? new Date(lastModified) : null
+    };
+  } catch (error) {
+    if (DEBUG) console.warn(`Photo download failed for MMSI ${mmsi}:`, error.message);
+    return null;
+  }
+}
+
+// Cache vessel photo
+async function cacheVesselPhoto(mmsi, picId) {
+  const filename = `${mmsi}.jpg`;
+  const filepath = path.join(PHOTO_CACHE_DIR, filename);
+  
+  const photoResult = await downloadVesselPhoto(mmsi, picId);
+  if (!photoResult) return false;
+  
+  const photoData = photoResult.data || photoResult;
+  const lastModified = photoResult.lastModified || null;
+  
+  try {
+    fs.writeFileSync(filepath, photoData);
+    
+    const photoInfo = {
+      filename,
+      downloadedAt: new Date(),
+      lastModified,
+      picId
+    };
+    
+    photoCache.set(mmsi, photoInfo);
+    savePhotoCache();
+    
+    if (DEBUG) console.log(`Cached photo for MMSI ${mmsi}`);
+    return true;
+  } catch (error) {
+    console.warn(`Failed to cache photo for MMSI ${mmsi}:`, error.message);
+    return false;
+  }
+}
+
+// Check if photo needs update based on Last-Modified
+async function checkPhotoUpdate(mmsi, picId) {
+  try {
+    const photoUrl = `https://static.vesselfinder.net/ship-photo/${picId}/1`;
+    const response = await fetch(photoUrl, {
+      method: 'HEAD',
+      timeout: 5000,
+      headers: { 'User-Agent': 'AIS-Proxy/1.0' }
+    });
+    
+    if (!response.ok) return false;
+    
+    const lastModified = response.headers.get('last-modified');
+    if (!lastModified) return false;
+    
+    const photoInfo = photoCache.get(mmsi);
+    if (!photoInfo || !photoInfo.lastModified) return true;
+    
+    const serverModified = new Date(lastModified);
+    return serverModified > photoInfo.lastModified;
+  } catch (error) {
+    if (DEBUG) console.warn(`Photo update check failed for MMSI ${mmsi}:`, error.message);
+    return false;
+  }
+}
+
+// Clean up expired photos
+function cleanupExpiredPhotos() {
+  const expiredDate = new Date(Date.now() - (PHOTO_CACHE_DAYS * 24 * 60 * 60 * 1000));
+  let cleaned = 0;
+  
+  for (const [mmsi, photoInfo] of photoCache.entries()) {
+    if (photoInfo.downloadedAt < expiredDate) {
+      const filepath = path.join(PHOTO_CACHE_DIR, photoInfo.filename);
+      try {
+        fs.unlinkSync(filepath);
+        photoCache.delete(mmsi);
+        cleaned++;
+      } catch (error) {
+        console.warn(`Failed to delete expired photo for MMSI ${mmsi}:`, error.message);
+      }
+    }
+  }
+  
+  if (cleaned > 0) {
+    console.log(`Cleaned up ${cleaned} expired photos`);
+    savePhotoCache();
+  }
+}
+
+// Process photo update queue (daily updates)
+async function processPhotoUpdateQueue() {
+  if (photoUpdateInProgress || photoUpdateQueue.length === 0) return;
+  
+  photoUpdateInProgress = true;
+  const batchSize = Math.min(PHOTO_UPDATE_BATCH_SIZE, photoUpdateQueue.length);
+  
+  for (let i = 0; i < batchSize; i++) {
+    const { mmsi, picId } = photoUpdateQueue.shift();
+    
+    try {
+      const needsUpdate = await checkPhotoUpdate(mmsi, picId);
+      if (needsUpdate) {
+        await cacheVesselPhoto(mmsi, picId);
+        if (DEBUG) console.log(`Updated photo for MMSI ${mmsi}`);
+      }
+    } catch (error) {
+      console.warn(`Photo update failed for MMSI ${mmsi}:`, error.message);
+    }
+    
+    // Rate limit between requests
+    if (i < batchSize - 1) {
+      await new Promise(resolve => setTimeout(resolve, PHOTO_UPDATE_DELAY));
+    }
+  }
+  
+  photoUpdateInProgress = false;
+  
+  // Schedule next batch if more items remain
+  if (photoUpdateQueue.length > 0) {
+    const delay = Math.max(1000, (24 * 60 * 60 * 1000) / Math.ceil(photoCache.size / PHOTO_UPDATE_BATCH_SIZE));
+    setTimeout(processPhotoUpdateQueue, delay);
+  }
+}
+
+// Queue all cached photos for daily update check
+function queueDailyPhotoUpdates() {
+  photoUpdateQueue.length = 0; // Clear existing queue
+  
+  for (const [mmsi, photoInfo] of photoCache.entries()) {
+    if (photoInfo.picId) {
+      photoUpdateQueue.push({ mmsi, picId: photoInfo.picId });
+    }
+  }
+  
+  console.log(`Queued ${photoUpdateQueue.length} photos for daily update check`);
+  processPhotoUpdateQueue();
+}
+
 // Enhanced vessel lookup
 async function lookupVesselData(mmsi) {
   try {
@@ -347,7 +561,7 @@ async function lookupVesselData(mmsi) {
       }
     }
     
-    return {
+    const result = {
       name: data.name.trim(),
       type: aisType,
       imo: data.imo || null,
@@ -355,8 +569,19 @@ async function lookupVesselData(mmsi) {
       grossTonnage: data.gt || null,
       deadweight: data.dw || null,
       yearBuilt: data.y || null,
-      typeText: data.type || null
+      typeText: data.type || null,
+      picId: data.pic || null
     };
+    
+    // Cache photo if pic ID is available and not already cached
+    if (data.pic && !photoCache.has(mmsi)) {
+      // Don't await - cache in background
+      cacheVesselPhoto(mmsi, data.pic).catch(error => {
+        if (DEBUG) console.warn(`Background photo caching failed for MMSI ${mmsi}:`, error.message);
+      });
+    }
+    
+    return result;
   } catch (error) {
     if (DEBUG) console.warn(`Vessel lookup failed for MMSI ${mmsi}:`, error.message);
     return null;
@@ -668,7 +893,70 @@ setInterval(() => {
   }
 }, 300000);
 
+// Clean up expired photos daily
+setInterval(cleanupExpiredPhotos, 24 * 60 * 60 * 1000);
+
+// Queue daily photo updates (spread over 24 hours)
+setInterval(queueDailyPhotoUpdates, 24 * 60 * 60 * 1000);
+
 setInterval(saveCache, 600000);
+
+// Ship photo endpoint
+app.get('/ais-proxy/ship-photo/:mmsi', async (req, res) => {
+  const mmsi = parseInt(req.params.mmsi);
+  
+  if (isNaN(mmsi)) {
+    return res.status(400).json({ error: 'Invalid MMSI' });
+  }
+  
+  const photoInfo = photoCache.get(mmsi);
+  
+  if (photoInfo) {
+    const filepath = path.join(PHOTO_CACHE_DIR, photoInfo.filename);
+    
+    try {
+      if (fs.existsSync(filepath)) {
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
+        return res.sendFile(path.resolve(filepath));
+      }
+    } catch (error) {
+      console.warn(`Failed to serve cached photo for MMSI ${mmsi}:`, error.message);
+    }
+  }
+  
+  // Try to get photo from vessel lookup if not cached
+  try {
+    const vesselData = await lookupVesselData(mmsi);
+    if (vesselData && vesselData.picId) {
+      // Cache the photo and serve it
+      const success = await cacheVesselPhoto(mmsi, vesselData.picId);
+      if (success) {
+        const filepath = path.join(PHOTO_CACHE_DIR, `${mmsi}.jpg`);
+        res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.sendFile(path.resolve(filepath));
+      }
+    }
+  } catch (error) {
+    console.warn(`Failed to lookup and cache photo for MMSI ${mmsi}:`, error.message);
+  }
+  
+  // Serve placeholder image
+  const placeholderPath = getPlaceholderImagePath();
+  try {
+    if (fs.existsSync(placeholderPath)) {
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache placeholder for 1 hour
+      return res.sendFile(path.resolve(placeholderPath));
+    }
+  } catch (error) {
+    console.warn('Failed to serve placeholder image:', error.message);
+  }
+  
+  // Fallback to 404 if placeholder not found
+  res.status(404).json({ error: 'Photo not available' });
+});
 
 // AISHub-compatible REST endpoint
 app.get('/ais-proxy/ws.php', async (req, res) => {
@@ -870,6 +1158,7 @@ app.get('/ais-proxy/health', async (req, res) => {
     res.json({ 
       status: 'ok', 
       vessels: vesselCache.size,
+      photos: photoCache.size,
       uptime: process.uptime(),
       user_keys_configured: enabledUserKeys,
       aisstream_key_configured: hasAISStreamKey,
@@ -916,6 +1205,11 @@ app.get('/ais-proxy/v2/health', async (req, res) => {
         classB,
         navigationAids,
         other
+      },
+      photos: {
+        cached: photoCache.size,
+        queuedForUpdate: photoUpdateQueue.length,
+        updateInProgress: photoUpdateInProgress
       },
       dataFreshness: {
         oldestUpdate: vesselCache.size > 0 ? oldestUpdate.toISOString() : null,
@@ -970,6 +1264,11 @@ process.on('SIGINT', () => {
 
 app.listen(PORT, () => {
   console.log(`AIS Proxy server running on port ${PORT}`);
+  initPhotoCache();
   loadCache();
+  loadPhotoCache();
   connectToAISStream();
+  
+  // Start daily photo updates after 1 hour
+  setTimeout(queueDailyPhotoUpdates, 60 * 60 * 1000);
 });
