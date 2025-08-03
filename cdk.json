@@ -1,5 +1,5 @@
 {
-  "app": "node --max-old-space-size=2048 --require ts-node/register --prefer-ts-exts bin/cdk.ts",
+  "app": "npx ts-node --prefer-ts-exts bin/cdk.ts",
   "assetMetadata": false,
   "pathMetadata": false,
   "versionReporting": false,

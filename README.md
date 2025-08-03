@@ -25,11 +25,12 @@ Weather radar proxy service providing access to real-time radar data from RainVi
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
 ### ais-proxy
-AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream.
+AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with ship photo caching.
 
 - **Path**: `/ais-proxy/*`
 - **Port**: 3000
 - **Health Check**: `/ais-proxy/health`
+- **Ship Photos**: `/ais-proxy/ship-photo/{mmsi}`
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
 ## Configuration
