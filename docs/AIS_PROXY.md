@@ -147,9 +147,10 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 - **Coverage**: New Zealand waters (configurable bounding box)
 - **Caching**: Vessel data cached in memory with 1-hour expiration
 - **Persistence**: Cache persisted to disk for service restarts
-- **Compatibility**: AISHub-compatible API format
+- **Compatibility**: AISHub-compatible API format (vessels only, no navigation aids)
 - **WebSocket**: Maintains persistent connection to AISStream
 - **Reconnection**: Automatic reconnection on connection loss
+- **Filtering**: Navigation aids are automatically filtered out to maintain AISHub compatibility
 
 ## Data Fields
 
