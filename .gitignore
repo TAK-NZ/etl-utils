@@ -1,5 +1,8 @@
 *.js
 !jest.config.js
+!ais-proxy/server.js
+!weather-proxy/server.js
+!scripts/*.js
 *.d.ts
 node_modules
 
