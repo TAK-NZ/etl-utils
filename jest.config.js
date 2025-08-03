@@ -8,8 +8,11 @@ module.exports = {
   collectCoverageFrom: [
     'lib/**/*.ts',
     '!lib/**/*.d.ts',
+    '!lib/**/*.js',
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  testTimeout: 30000,
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   setupFilesAfterEnv: ['<rootDir>/test/setup.ts']
 };

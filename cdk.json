@@ -36,6 +36,15 @@
           "cpu": 256,
           "memory": 512,
           "priority": 1
+        },
+        "ais-proxy": {
+          "enabled": true,
+          "path": "/ais-proxy",
+          "healthCheckPath": "/ais-proxy/health",
+          "port": 3000,
+          "cpu": 256,
+          "memory": 512,
+          "priority": 2
         }
       },
       "general": {
@@ -66,6 +75,15 @@
           "cpu": 512,
           "memory": 1024,
           "priority": 1
+        },
+        "ais-proxy": {
+          "enabled": true,
+          "path": "/ais-proxy",
+          "healthCheckPath": "/ais-proxy/health",
+          "port": 3000,
+          "cpu": 512,
+          "memory": 1024,
+          "priority": 2
         }
       },
       "general": {

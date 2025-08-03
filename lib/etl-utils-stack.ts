@@ -6,6 +6,7 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as efs from 'aws-cdk-lib/aws-efs';
 
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
@@ -81,6 +82,55 @@ export class EtlUtilsStack extends cdk.Stack {
     });
 
     // =================
+    // CREATE EFS FILE SYSTEM
+    // =================
+
+    const efsFileSystem = new efs.FileSystem(this, 'EfsFileSystem', {
+      vpc,
+      encrypted: true,
+      performanceMode: efs.PerformanceMode.GENERAL_PURPOSE,
+      throughputMode: efs.ThroughputMode.BURSTING,
+      removalPolicy: envConfig.general.removalPolicy === 'DESTROY' ? cdk.RemovalPolicy.DESTROY : cdk.RemovalPolicy.RETAIN,
+      securityGroup: securityGroups.efs,
+      fileSystemPolicy: iam.PolicyDocument.fromJson({
+        Version: '2012-10-17',
+        Statement: [
+          {
+            Effect: 'Allow',
+            Principal: {
+              AWS: '*'
+            },
+            Action: [
+              'elasticfilesystem:ClientMount',
+              'elasticfilesystem:ClientWrite',
+              'elasticfilesystem:ClientRootAccess'
+            ],
+            Condition: {
+              Bool: {
+                'elasticfilesystem:AccessedViaMountTarget': 'true'
+              }
+            }
+          }
+        ]
+      })
+    });
+
+    // Create EFS access point for ais-proxy
+    const aisProxyAccessPoint = new efs.AccessPoint(this, 'AisProxyAccessPoint', {
+      fileSystem: efsFileSystem,
+      posixUser: {
+        uid: '1001',
+        gid: '1001'
+      },
+      path: '/ais-proxy',
+      createAcl: {
+        ownerUid: '1001',
+        ownerGid: '1001',
+        permissions: '755'
+      }
+    });
+
+    // =================
     // CREATE APPLICATION LOAD BALANCER
     // =================
 
@@ -99,7 +149,7 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // Task execution role
     const taskExecutionRole = new iam.Role(this, 'TaskExecutionRole', {
-      roleName: `etl-utils-${stackNameComponent.toLowerCase()}-task-execution`,
+      roleName: `TAK-${stackNameComponent}-ETL-Utils-task-execution`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
@@ -108,7 +158,7 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // Task role
     const taskRole = new iam.Role(this, 'TaskRole', {
-      roleName: `etl-utils-${stackNameComponent.toLowerCase()}-task`,
+      roleName: `TAK-${stackNameComponent}-ETL-Utils-task`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
 
@@ -130,6 +180,30 @@ export class EtlUtilsStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['s3:ListBucket'],
       resources: [configBucketArn],
+    }));
+
+    // Grant KMS decrypt permissions for S3 bucket
+    const kmsKeyArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.KMS_KEY));
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['kms:Decrypt'],
+      resources: [kmsKeyArn],
+    }));
+
+    // Add EFS permissions for task role (needed for ais-proxy)
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'elasticfilesystem:ClientMount',
+        'elasticfilesystem:ClientWrite',
+        'elasticfilesystem:ClientRootAccess',
+        'elasticfilesystem:DescribeMountTargets',
+        'elasticfilesystem:DescribeFileSystems'
+      ],
+      resources: [
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${efsFileSystem.fileSystemId}`,
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`
+      ]
     }));
 
     // =================
@@ -163,6 +237,9 @@ export class EtlUtilsStack extends cdk.Stack {
       if (containerName === 'weather-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-Weather-Proxy-Api-Keys.json';
+      } else if (containerName === 'ais-proxy') {
+        environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+        environmentVariables.CONFIG_KEY = 'ETL-Util-AIS-Proxy-Api-Keys.json';
       }
 
       // Create container service
@@ -177,6 +254,8 @@ export class EtlUtilsStack extends cdk.Stack {
         taskExecutionRole,
         containerImageUri,
         environmentVariables,
+        stackNameComponent,
+        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : undefined,
       });
 
       containerServices[containerName] = containerService;

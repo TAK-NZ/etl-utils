@@ -1,14 +1,15 @@
 /**
- * Test setup file for ETL Utils Infrastructure tests
+ * Test setup for ETL Utils CDK tests
  */
 
-// Set test environment variables
+// Set required environment variables for CDK
 process.env.CDK_DEFAULT_ACCOUNT = '123456789012';
 process.env.CDK_DEFAULT_REGION = 'us-east-1';
+process.env.NODE_ENV = 'test';
 
-// Mock console methods to reduce test noise
-const originalConsoleWarn = console.warn;
-const originalConsoleError = console.error;
+// Suppress CDK warnings in tests
+const originalWarn = console.warn;
+const originalError = console.error;
 
 beforeAll(() => {
   console.warn = jest.fn();
@@ -16,6 +17,6 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  console.warn = originalConsoleWarn;
-  console.error = originalConsoleError;
+  console.warn = originalWarn;
+  console.error = originalError;
 });

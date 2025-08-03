@@ -8,6 +8,7 @@ import {
   aws_elasticloadbalancingv2 as elbv2,
   aws_logs as logs,
   aws_iam as iam,
+  aws_efs as efs,
   Duration,
   RemovalPolicy,
   Fn,
@@ -69,6 +70,16 @@ export interface ContainerServiceProps {
    * Additional environment variables (optional)
    */
   environmentVariables?: { [key: string]: string };
+
+  /**
+   * Stack name component for imports
+   */
+  stackNameComponent: string;
+
+  /**
+   * EFS access point (optional, for persistent storage)
+   */
+  efsAccessPoint?: efs.IAccessPoint;
 }
 
 /**
@@ -103,24 +114,41 @@ export class ContainerService extends Construct {
       taskRole,
       taskExecutionRole,
       containerImageUri,
-      environmentVariables = {}
+      environmentVariables = {},
+      stackNameComponent,
+      efsAccessPoint
     } = props;
 
     // Create CloudWatch log group
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/ecs/etl-utils-${contextConfig.stackName.toLowerCase()}-${containerName}`,
+      logGroupName: `/ecs/TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       retention: environment === 'prod' ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
       removalPolicy: contextConfig.general.removalPolicy === 'DESTROY' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
 
     // Create task definition
     this.taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
-      family: `etl-utils-${contextConfig.stackName.toLowerCase()}-${containerName}`,
+      family: `TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       cpu: containerConfig.cpu,
       memoryLimitMiB: containerConfig.memory,
       taskRole,
       executionRole: taskExecutionRole,
     });
+
+    // Add EFS volume for ais-proxy if needed
+    if (containerName === 'ais-proxy' && efsAccessPoint) {
+      this.taskDefinition.addVolume({
+        name: 'efs-volume',
+        efsVolumeConfiguration: {
+          fileSystemId: efsAccessPoint.fileSystem.fileSystemId,
+          transitEncryption: 'ENABLED',
+          authorizationConfig: {
+            accessPointId: efsAccessPoint.accessPointId,
+            iam: 'ENABLED'
+          }
+        }
+      });
+    }
 
     // Determine container image
     let containerImage: ecs.ContainerImage;
@@ -163,9 +191,18 @@ export class ContainerService extends Construct {
       },
     });
 
+    // Add EFS mount point for ais-proxy
+    if (containerName === 'ais-proxy' && efsAccessPoint) {
+      container.addMountPoints({
+        sourceVolume: 'efs-volume',
+        containerPath: '/data',
+        readOnly: false
+      });
+    }
+
     // Create target group
     this.targetGroup = new elbv2.ApplicationTargetGroup(this, 'TargetGroup', {
-      targetGroupName: `etl-utils-${contextConfig.stackName.toLowerCase()}-${containerName}`,
+      targetGroupName: `TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       vpc: ecsCluster.vpc,
       targetType: elbv2.TargetType.IP,
       port: containerConfig.port,
@@ -184,7 +221,7 @@ export class ContainerService extends Construct {
 
     // Create ECS service
     this.service = new ecs.FargateService(this, 'Service', {
-      serviceName: `etl-utils-${contextConfig.stackName.toLowerCase()}-${containerName}`,
+      serviceName: `TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       cluster: ecsCluster,
       taskDefinition: this.taskDefinition,
       desiredCount: contextConfig.ecs.desiredCount,

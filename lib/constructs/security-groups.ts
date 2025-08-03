@@ -33,6 +33,11 @@ export class SecurityGroups extends Construct {
    */
   public readonly ecs: ec2.SecurityGroup;
 
+  /**
+   * Security group for EFS
+   */
+  public readonly efs: ec2.SecurityGroup;
+
   constructor(scope: Construct, id: string, props: SecurityGroupsProps) {
     super(scope, id);
 
@@ -41,7 +46,7 @@ export class SecurityGroups extends Construct {
     // ALB Security Group
     this.alb = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
       vpc,
-      securityGroupName: `etl-utils-${stackNameComponent.toLowerCase()}-alb`,
+      securityGroupName: `TAK-${stackNameComponent}-ETL-Utils-alb`,
       description: 'Security group for ETL Utils Application Load Balancer',
       allowAllOutbound: true,
     });
@@ -75,7 +80,7 @@ export class SecurityGroups extends Construct {
     // ECS Security Group
     this.ecs = new ec2.SecurityGroup(this, 'EcsSecurityGroup', {
       vpc,
-      securityGroupName: `etl-utils-${stackNameComponent.toLowerCase()}-ecs`,
+      securityGroupName: `TAK-${stackNameComponent}-ETL-Utils-ecs`,
       description: 'Security group for ETL Utils ECS tasks',
       allowAllOutbound: true,
       allowAllIpv6Outbound: true,
@@ -99,6 +104,21 @@ export class SecurityGroups extends Construct {
       this.alb,
       ec2.Port.tcp(8080),
       'Allow traffic from ALB on port 8080'
+    );
+
+    // EFS Security Group
+    this.efs = new ec2.SecurityGroup(this, 'EfsSecurityGroup', {
+      vpc,
+      securityGroupName: `TAK-${stackNameComponent}-ETL-Utils-efs`,
+      description: 'Security group for ETL Utils EFS',
+      allowAllOutbound: false,
+    });
+
+    // Allow ECS tasks to access EFS
+    this.efs.addIngressRule(
+      this.ecs,
+      ec2.Port.tcp(2049),
+      'Allow ECS tasks to access EFS'
     );
   }
 }
