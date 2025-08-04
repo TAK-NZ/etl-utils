@@ -28,24 +28,7 @@ The AIS Proxy service includes automatic vessel name lookup for Class B vessels 
 
 ### Vessel Type Mapping
 
-Text descriptions from VesselFinder are mapped to AIS type codes:
-
-| VesselFinder Type | AIS Code | Description |
-|-------------------|----------|-------------|
-| Cargo ship | 70 | General cargo |
-| Container ship | 70 | Container vessel |
-| Tanker | 80 | Liquid bulk |
-| Passenger ship | 60 | Passenger vessel |
-| Fishing vessel | 30 | Fishing |
-| Tug/Tugboat | 52 | Tug |
-| Yacht | 37 | Pleasure craft |
-| Sailing vessel | 36 | Sailing |
-| Military/Naval | 35 | Military ops |
-
-**Benefits:**
-- Class B vessels get proper AIS type codes
-- Consistent with AIS standards
-- Better vessel classification
+Text descriptions from VesselFinder are mapped to standard AIS type codes for consistent vessel classification.
 
 ### Rate Limiting
 - 2-second delay between lookup requests
