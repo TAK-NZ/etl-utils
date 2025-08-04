@@ -1,0 +1,8 @@
+{
+  "allowedDomains": [
+    "trafficnz.info",
+    "www.trafficnz.info",
+    "example.com"
+  ],
+  "description": "Camera proxy configuration - controls which domains can be used as image sources"
+}

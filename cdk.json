@@ -48,6 +48,15 @@
           "cpu": 256,
           "memory": 512,
           "priority": 2
+        },
+        "camera-proxy": {
+          "enabled": true,
+          "path": "/camera-proxy",
+          "healthCheckPath": "/camera-proxy/health",
+          "port": 3000,
+          "cpu": 256,
+          "memory": 512,
+          "priority": 3
         }
       },
       "general": {
@@ -87,6 +96,15 @@
           "cpu": 512,
           "memory": 1024,
           "priority": 2
+        },
+        "camera-proxy": {
+          "enabled": true,
+          "path": "/camera-proxy",
+          "healthCheckPath": "/camera-proxy/health",
+          "port": 3000,
+          "cpu": 512,
+          "memory": 1024,
+          "priority": 3
         }
       },
       "general": {

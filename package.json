@@ -16,6 +16,7 @@
     "destroy": "cdk destroy",
     "diff": "npm run clean:assets && cdk diff",
     "synth": "npm run clean:assets && cdk synth",
+    "clean": "rm -rf lib/*.js lib/**/*.js lib/*.d.ts lib/**/*.d.ts coverage cdk.out",
     "clean:assets": "rm -rf cdk.out",
     "clean:all": "npm run clean:assets && rm -rf node_modules coverage",
     "kill:node": "pkill -f node || true"
