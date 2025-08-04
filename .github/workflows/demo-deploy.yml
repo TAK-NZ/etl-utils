@@ -93,7 +93,8 @@ jobs:
   revert-to-dev-test:
     runs-on: ubuntu-latest
     environment: demo
-
+    needs: [deploy-and-test]
+    if: always()
     steps:
       - name: Checkout
         uses: actions/checkout@v4
