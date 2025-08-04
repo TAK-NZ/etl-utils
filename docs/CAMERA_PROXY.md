@@ -1,47 +1,33 @@
 # Camera Proxy API
 
-The Camera Proxy service converts static camera images into HLS video streams by downloading images at regular intervals and generating live video segments.
+The Camera Proxy service converts static camera images into MJPEG video streams by downloading images at regular intervals and broadcasting them to connected clients.
 
 ## Overview
 
 - **Base URL**: `https://utils.{domain}/camera-proxy`
 - **On-demand streaming**: Streams start automatically when accessed
-- **Image download interval**: 10 seconds
-- **HLS segment duration**: 10 seconds
-- **Playlist size**: 6 segments (1 minute of video)
+- **Image download interval**: 30 seconds
+- **Frame broadcast interval**: 3 seconds (for ATAK compatibility)
 - **Stream timeout**: 5 minutes of inactivity
 
 ## API Endpoints
 
-### Get HLS Playlist
+### Get MJPEG Stream
 ```
-GET /camera-proxy/stream/playlist.m3u8?url={image_url}
+GET /camera-proxy/stream/mjpeg?url={image_url}
 ```
 
 **Parameters:**
 - `url` (required): URL of the static image to stream
 
 **Response:**
-- Content-Type: `application/vnd.apple.mpegurl`
-- Returns HLS playlist file
+- Content-Type: `multipart/x-mixed-replace; boundary=frame`
+- Returns continuous MJPEG stream
 
 **Example:**
 ```
-GET /camera-proxy/stream/playlist.m3u8?url=https://www.trafficnz.info/camera/628.jpg
+GET /camera-proxy/stream/mjpeg?url=https://www.trafficnz.info/camera/628.jpg
 ```
-
-### Get Video Segment
-```
-GET /camera-proxy/stream/{segment.ts}?url={image_url}
-```
-
-**Parameters:**
-- `segment.ts`: HLS segment filename (e.g., `segment0.ts`)
-- `url` (required): URL of the static image
-
-**Response:**
-- Content-Type: `video/mp2t`
-- Returns video segment data
 
 ### List Active Streams
 ```
@@ -58,7 +44,7 @@ GET /camera-proxy/streams
       "active": true,
       "lastUpdate": "2024-01-01T12:00:00.000Z",
       "lastAccess": "2024-01-01T12:05:00.000Z",
-      "playlistUrl": "/camera-proxy/stream/playlist.m3u8?url=..."
+      "mjpegUrl": "/camera-proxy/stream/mjpeg?url=..."
     }
   ]
 }
@@ -81,30 +67,29 @@ GET /camera-proxy/health
 
 ## Usage Examples
 
-### Direct HLS Streaming
+### Direct MJPEG Streaming
 ```bash
 # Play with ffplay
-ffplay "https://utils.tak.nz/camera-proxy/stream/playlist.m3u8?url=https://www.trafficnz.info/camera/628.jpg"
+ffplay "https://utils.tak.nz/camera-proxy/stream/mjpeg?url=https://www.trafficnz.info/camera/628.jpg"
 
 # Play with VLC
-vlc "https://utils.tak.nz/camera-proxy/stream/playlist.m3u8?url=https://www.trafficnz.info/camera/628.jpg"
+vlc "https://utils.tak.nz/camera-proxy/stream/mjpeg?url=https://www.trafficnz.info/camera/628.jpg"
 ```
 
-### Web Player
-```html
-<video controls>
-  <source src="/camera-proxy/stream/playlist.m3u8?url=https://www.trafficnz.info/camera/628.jpg" 
-          type="application/vnd.apple.mpegurl">
+### ATAK Integration
+```xml
+<!-- Add to ATAK video feeds -->
+<video>
+  <source>https://utils.tak.nz/camera-proxy/stream/mjpeg?url=https://www.trafficnz.info/camera/628.jpg</source>
+  <type>mjpeg</type>
 </video>
 ```
 
-### JavaScript HLS Player
-```javascript
-// Using hls.js
-const video = document.getElementById('video');
-const hls = new Hls();
-hls.loadSource('/camera-proxy/stream/playlist.m3u8?url=https://www.trafficnz.info/camera/628.jpg');
-hls.attachMedia(video);
+### Web Browser
+```html
+<!-- Direct MJPEG display -->
+<img src="/camera-proxy/stream/mjpeg?url=https://www.trafficnz.info/camera/628.jpg" 
+     alt="Live Camera Feed">
 ```
 
 ## Configuration
@@ -132,10 +117,11 @@ The service uses S3 configuration to manage allowed domains:
 
 ## Stream Management
 
-- **Automatic start**: Streams begin when playlist is first requested
-- **Access tracking**: Last access time tracked for cleanup
+- **Automatic start**: Streams begin when MJPEG endpoint is first accessed
+- **Client tracking**: Active client connections monitored
 - **Automatic cleanup**: Inactive streams stopped after 5 minutes
-- **Resource efficient**: Only active streams consume resources
+- **Resource efficient**: Only streams with active clients consume resources
+- **Continuous frames**: Sends frames every 3 seconds for ATAK compatibility
 
 ## Rate Limiting
 
@@ -161,7 +147,7 @@ The service uses S3 configuration to manage allowed domains:
 ### 404 Not Found
 ```json
 {
-  "error": "Playlist not ready"
+  "error": "Stream not found"
 }
 ```
 
@@ -174,12 +160,12 @@ The service uses S3 configuration to manage allowed domains:
 
 ## Technical Details
 
-- **Image format**: Any format supported by FFmpeg
-- **Video codec**: H.264 (libx264)
-- **Container**: MPEG-TS segments
-- **Preset**: ultrafast (optimized for real-time)
-- **Pixel format**: yuv420p (wide compatibility)
-- **Frame rate**: 0.1 fps (10 seconds per image)
+- **Stream format**: MJPEG (Motion JPEG)
+- **Image format**: JPEG images from static URLs
+- **Container**: multipart/x-mixed-replace HTTP stream
+- **Frame delivery**: Continuous broadcast every 3 seconds
+- **Download interval**: 30 seconds (to avoid rate limiting)
+- **Boundary**: `--frame` with proper MIME headers
 
 ## Monitoring
 
