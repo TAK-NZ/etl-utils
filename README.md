@@ -1,10 +1,10 @@
 # ETL Utils Infrastructure
 
-CDK Infrastructure for deploying multiple Docker containers to an existing ECS Fargate service, fronted by an Application Load Balancer.
+<p align='center'>Utilities to support other ETLs</p>
 
 ## Overview
 
-This CDK stack deploys containerized utility services to the existing TAK infrastructure, providing a scalable platform for various ETL and data processing tools.
+This CDK stack deploys containerized utility services to the existing TAK infrastructure, providing a scalable platform for various data processing tools in support of ETLs.
 
 ## Architecture
 
@@ -17,10 +17,9 @@ This CDK stack deploys containerized utility services to the existing TAK infras
 ## Services
 
 ### weather-proxy
-Weather radar proxy service providing access to real-time radar data from RainViewer.
+Weather radar proxy service providing access to real-time radar data from [Rain Viewer](https://www.rainviewer.com/api.html).
 
 - **Path**: `/weather-radar/*`
-- **Port**: 3000
 - **Health Check**: `/weather-radar/health`
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
@@ -28,16 +27,14 @@ Weather radar proxy service providing access to real-time radar data from RainVi
 AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with ship photo caching.
 
 - **Path**: `/ais-proxy/*`
-- **Port**: 3000
 - **Health Check**: `/ais-proxy/health`
 - **Ship Photos**: `/ais-proxy/ship-photo/{mmsi}`
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
 ### camera-proxy
-Camera proxy service that converts static images into HLS video streams by downloading images at regular intervals.
+Camera proxy service that converts static images into MJPEG video streams by downloading images at regular intervals.
 
 - **Path**: `/camera-proxy/*`
-- **Port**: 3000
 - **Health Check**: `/camera-proxy/health`
 - **HLS Playlist**: `/camera-proxy/stream/playlist.m3u8?url={image_url}`
 - **Documentation**: [Camera Proxy API](docs/CAMERA_PROXY.md)

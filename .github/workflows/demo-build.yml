@@ -1,0 +1,168 @@
+name: Build and Push Docker Images - Demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'weather-proxy/**'
+      - 'ais-proxy/**'
+      - 'camera-proxy/**'
+      - 'cdk.json'
+  workflow_call:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if version unchanged'
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      weather-proxy-tag:
+        description: 'Weather proxy image tag'
+        value: ${{ jobs.build-images.outputs.weather-proxy-tag }}
+      ais-proxy-tag:
+        description: 'AIS proxy image tag'
+        value: ${{ jobs.build-images.outputs.ais-proxy-tag }}
+      camera-proxy-tag:
+        description: 'Camera proxy image tag'
+        value: ${{ jobs.build-images.outputs.camera-proxy-tag }}
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if version unchanged'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    environment: demo
+    outputs:
+      weather-proxy-tag: ${{ steps.tags.outputs.weather-proxy-tag }}
+      ais-proxy-tag: ${{ steps.tags.outputs.ais-proxy-tag }}
+      camera-proxy-tag: ${{ steps.tags.outputs.camera-proxy-tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup CDK Environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-role-arn: ${{ secrets.DEMO_AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.DEMO_AWS_REGION }}
+          role-session-name: GitHubActions-DockerBuild
+      
+      - name: Get ECR Repository and Build Tags
+        id: tags
+        run: |
+          # Get ECR repository ARN from BaseInfra exports
+          ECR_REPO_ARN=$(aws cloudformation describe-stacks \
+            --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-BaseInfra \
+            --query 'Stacks[0].Outputs[?OutputKey==`EcrETLRepoArnOutput`].OutputValue' \
+            --output text)
+          
+          if [[ -z "$ECR_REPO_ARN" ]]; then
+            echo "ERROR: ECR repository ARN not found in BaseInfra stack outputs"
+            exit 1
+          fi
+          
+          # Extract repository name from ARN and build URI
+          ECR_REPO_NAME=$(echo $ECR_REPO_ARN | cut -d'/' -f2)
+          ECR_REPO_URI="${{ secrets.DEMO_AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.DEMO_AWS_REGION }}.amazonaws.com/${ECR_REPO_NAME}"
+          
+          VERSION=$(jq -r '.context."dev-test".docker.imageTag' cdk.json)
+          
+          if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            WEATHER_TAG="weather-proxy-${VERSION}-${TIMESTAMP}"
+            AIS_TAG="ais-proxy-${VERSION}-${TIMESTAMP}"
+            CAMERA_TAG="camera-proxy-${VERSION}-${TIMESTAMP}"
+          else
+            WEATHER_TAG="weather-proxy-${VERSION}"
+            AIS_TAG="ais-proxy-${VERSION}"
+            CAMERA_TAG="camera-proxy-${VERSION}"
+          fi
+          
+          echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
+          echo "weather-proxy-tag=$WEATHER_TAG" >> $GITHUB_OUTPUT
+          echo "ais-proxy-tag=$AIS_TAG" >> $GITHUB_OUTPUT
+          echo "camera-proxy-tag=$CAMERA_TAG" >> $GITHUB_OUTPUT
+          echo "Using ECR repository: $ECR_REPO_URI"
+          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG, $CAMERA_TAG"
+      
+      - name: Check Enabled Containers
+        id: containers
+        run: |
+          WEATHER_ENABLED=$(jq -r '.context."dev-test".containers."weather-proxy".enabled' cdk.json)
+          AIS_ENABLED=$(jq -r '.context."dev-test".containers."ais-proxy".enabled' cdk.json)
+          CAMERA_ENABLED=$(jq -r '.context."dev-test".containers."camera-proxy".enabled' cdk.json)
+          
+          echo "weather-enabled=$WEATHER_ENABLED" >> $GITHUB_OUTPUT
+          echo "ais-enabled=$AIS_ENABLED" >> $GITHUB_OUTPUT
+          echo "camera-enabled=$CAMERA_ENABLED" >> $GITHUB_OUTPUT
+      
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.DEMO_AWS_REGION }} | \
+            docker login --username AWS --password-stdin \
+            ${{ steps.tags.outputs.ecr-repo-uri }}
+      
+      - name: Build and Push Container Images
+        run: |
+          ECR_REPO_NAME=$(echo ${{ steps.tags.outputs.ecr-repo-uri }} | cut -d'/' -f2)
+          
+          # Build weather-proxy if enabled
+          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.weather-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ Weather proxy image already exists, skipping build"
+            else
+              echo "🔨 Building weather-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }} ./weather-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }}
+              echo "✅ Weather proxy image pushed"
+            fi
+          fi
+          
+          # Build ais-proxy if enabled
+          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.ais-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ AIS proxy image already exists, skipping build"
+            else
+              echo "🔨 Building ais-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }} ./ais-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }}
+              echo "✅ AIS proxy image pushed"
+            fi
+          fi
+          
+          # Build camera-proxy if enabled
+          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.camera-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ Camera proxy image already exists, skipping build"
+            else
+              echo "🔨 Building camera-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }} ./camera-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }}
+              echo "✅ Camera proxy image pushed"
+            fi
+          fi
+      
+      - name: Output Image Information
+        run: |
+          echo "✅ Successfully built and pushed Docker images:"
+          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
+            echo "📦 Weather Proxy: ${{ steps.tags.outputs.weather-proxy-tag }}"
+          fi
+          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
+            echo "📦 AIS Proxy: ${{ steps.tags.outputs.ais-proxy-tag }}"
+          fi
+          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
+            echo "📦 Camera Proxy: ${{ steps.tags.outputs.camera-proxy-tag }}"
+          fi
+          echo ""
+          echo "🚀 To deploy with these images, use:"
+          echo "npm run cdk deploy -- --context usePreBuiltImages=true"
