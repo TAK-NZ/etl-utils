@@ -62,7 +62,7 @@ jobs:
           # Get ECR repository ARN from BaseInfra exports
           ECR_REPO_ARN=$(aws cloudformation describe-stacks \
             --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-BaseInfra \
-            --query 'Stacks[0].Outputs[?OutputKey==`EcrArtifactsRepoArnOutput`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`EcrEtlTasksRepoArnOutput`].OutputValue' \
             --output text)
           
           if [[ -z "$ECR_REPO_ARN" ]]; then

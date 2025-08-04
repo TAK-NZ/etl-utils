@@ -226,7 +226,7 @@ export class EtlUtilsStack extends cdk.Stack {
       if (usePreBuiltImages) {
         const imageTag = this.node.tryGetContext(`${containerName}ImageTag`) ?? envConfig.docker.imageTag;
         // Get ECR repository ARN from BaseInfra and extract repository name
-        const ecrRepoArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ECR_REPO));
+        const ecrRepoArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ECR_ETL_REPO));
         // Extract repository name from ARN (format: arn:aws:ecr:region:account:repository/name)
         const ecrRepoName = Fn.select(1, Fn.split('/', ecrRepoArn));
         containerImageUri = `${this.account}.dkr.ecr.${this.region}.amazonaws.com/${cdk.Token.asString(ecrRepoName)}:${containerName}-${imageTag}`;
