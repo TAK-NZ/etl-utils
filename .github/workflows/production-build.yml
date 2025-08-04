@@ -70,45 +70,36 @@ jobs:
           ECR_REPO_NAME=$(echo $ECR_REPO_ARN | cut -d'/' -f2)
           ECR_REPO_URI="${{ secrets.PROD_AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.PROD_AWS_REGION }}.amazonaws.com/${ECR_REPO_NAME}"
           
-          VERSION=$(jq -r '.context."prod".takserver.version' cdk.json)
-          BRANDING=$(jq -r '.context."prod".takserver.branding' cdk.json)
-          REVISION=$(jq -r '.context."prod".takserver.buildRevision' cdk.json)
+          VERSION=$(jq -r '.context."prod".docker.imageTag' cdk.json)
           
           if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            TAK_TAG="tak-${VERSION}-${BRANDING}-r${REVISION}-${TIMESTAMP}"
+            WEATHER_TAG="weather-proxy-${VERSION}-${TIMESTAMP}"
+            AIS_TAG="ais-proxy-${VERSION}-${TIMESTAMP}"
+            CAMERA_TAG="camera-proxy-${VERSION}-${TIMESTAMP}"
           else
-            TAK_TAG="tak-${VERSION}-${BRANDING}-r${REVISION}"
+            WEATHER_TAG="weather-proxy-${VERSION}"
+            AIS_TAG="ais-proxy-${VERSION}"
+            CAMERA_TAG="camera-proxy-${VERSION}"
           fi
           
           echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
-          echo "tak-tag=$TAK_TAG" >> $GITHUB_OUTPUT
+          echo "weather-proxy-tag=$WEATHER_TAG" >> $GITHUB_OUTPUT
+          echo "ais-proxy-tag=$AIS_TAG" >> $GITHUB_OUTPUT
+          echo "camera-proxy-tag=$CAMERA_TAG" >> $GITHUB_OUTPUT
           echo "Using ECR repository: $ECR_REPO_URI"
-          echo "Building TAK server image with tag: $TAK_TAG"
+          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG, $CAMERA_TAG"
       
-      - name: Download TAK Server Distribution
+      - name: Check Enabled Containers
+        id: containers
         run: |
-          VERSION=$(jq -r '.context."prod".takserver.version' cdk.json)
-          TAK_FILE="takserver-docker-${VERSION}.zip"
+          WEATHER_ENABLED=$(jq -r '.context."prod".containers."weather-proxy".enabled' cdk.json)
+          AIS_ENABLED=$(jq -r '.context."prod".containers."ais-proxy".enabled' cdk.json)
+          CAMERA_ENABLED=$(jq -r '.context."prod".containers."camera-proxy".enabled' cdk.json)
           
-          if [ ! -f "$TAK_FILE" ]; then
-            echo "📥 Downloading TAK server distribution from S3..."
-            S3_BUCKET_ARN=$(aws cloudformation describe-stacks \
-              --stack-name TAK-${{ vars.PROD_STACK_NAME }}-BaseInfra \
-              --query 'Stacks[0].Outputs[?OutputKey==`S3TAKImagesArnOutput`].OutputValue' \
-              --output text)
-            S3_BUCKET=$(echo $S3_BUCKET_ARN | sed 's|arn:aws:s3:::|s3://|')
-            
-            if [[ -z "$S3_BUCKET_ARN" ]]; then
-              echo "ERROR: S3 TAK Images bucket ARN not found in BaseInfra stack outputs"
-              aws cloudformation describe-stacks --stack-name TAK-${{ vars.PROD_STACK_NAME }}-BaseInfra --query 'Stacks[0].Outputs[].{Key:OutputKey,Value:OutputValue}' --output table
-              exit 1
-            fi
-            aws s3 cp "${S3_BUCKET}/${TAK_FILE}" "${TAK_FILE}"
-            echo "✅ Downloaded ${TAK_FILE}"
-          else
-            echo "✅ TAK server distribution already exists locally"
-          fi
+          echo "weather-enabled=$WEATHER_ENABLED" >> $GITHUB_OUTPUT
+          echo "ais-enabled=$AIS_ENABLED" >> $GITHUB_OUTPUT
+          echo "camera-enabled=$CAMERA_ENABLED" >> $GITHUB_OUTPUT
       
       - name: Login to Amazon ECR
         run: |
@@ -116,35 +107,58 @@ jobs:
             docker login --username AWS --password-stdin \
             ${{ steps.tags.outputs.ecr-repo-uri }}
       
-      - name: Build and Push TAK Server Image
+      - name: Build and Push Container Images
         run: |
-          # Check if image already exists
-          if aws ecr describe-images --repository-name $(echo ${{ steps.tags.outputs.ecr-repo-uri }} | cut -d'/' -f2) --image-ids imageTag=${{ steps.tags.outputs.tak-tag }} >/dev/null 2>&1; then
-            echo "✅ TAK server image ${{ steps.tags.outputs.tak-tag }} already exists, skipping build"
-          else
-            echo "🔨 Building TAK server image ${{ steps.tags.outputs.tak-tag }}"
-            VERSION=$(jq -r '.context."prod".takserver.version' cdk.json)
-            BRANDING=$(jq -r '.context."prod".takserver.branding' cdk.json)
-            
-            docker build \
-              -f docker/tak-server/Dockerfile.${BRANDING} \
-              --build-arg TAK_VERSION=takserver-docker-${VERSION} \
-              --build-arg ENVIRONMENT=${{ vars.PROD_STACK_NAME }} \
-              --no-cache \
-              --rm \
-              -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tak-tag }} \
-              .
-            
-            docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tak-tag }}
-            echo "✅ TAK server image pushed successfully"
+          ECR_REPO_NAME=$(echo ${{ steps.tags.outputs.ecr-repo-uri }} | cut -d'/' -f2)
+          
+          # Build weather-proxy if enabled
+          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.weather-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ Weather proxy image already exists, skipping build"
+            else
+              echo "🔨 Building weather-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }} ./weather-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }}
+              echo "✅ Weather proxy image pushed"
+            fi
+          fi
+          
+          # Build ais-proxy if enabled
+          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.ais-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ AIS proxy image already exists, skipping build"
+            else
+              echo "🔨 Building ais-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }} ./ais-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }}
+              echo "✅ AIS proxy image pushed"
+            fi
+          fi
+          
+          # Build camera-proxy if enabled
+          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.camera-proxy-tag }} >/dev/null 2>&1; then
+              echo "✅ Camera proxy image already exists, skipping build"
+            else
+              echo "🔨 Building camera-proxy image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }} ./camera-proxy
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }}
+              echo "✅ Camera proxy image pushed"
+            fi
           fi
       
       - name: Output Image Information
         run: |
-          echo "✅ Successfully built and pushed Docker image:"
-          echo "📦 TAK Server: ${{ steps.tags.outputs.tak-tag }}"
+          echo "✅ Successfully built and pushed Docker images:"
+          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
+            echo "📦 Weather Proxy: ${{ steps.tags.outputs.weather-proxy-tag }}"
+          fi
+          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
+            echo "📦 AIS Proxy: ${{ steps.tags.outputs.ais-proxy-tag }}"
+          fi
+          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
+            echo "📦 Camera Proxy: ${{ steps.tags.outputs.camera-proxy-tag }}"
+          fi
           echo ""
-          echo "🚀 To deploy with this image, use:"
-          echo "npm run cdk deploy -- \\"
-          echo "  --context usePreBuiltImages=true \\"
-          echo "  --context takImageTag=${{ steps.tags.outputs.tak-tag }}"
+          echo "🚀 To deploy with these images, use:"
+          echo "npm run cdk deploy -- --context usePreBuiltImages=true"
