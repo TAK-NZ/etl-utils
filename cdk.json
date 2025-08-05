@@ -38,7 +38,8 @@
           "port": 3000,
           "cpu": 256,
           "memory": 512,
-          "priority": 1
+          "priority": 1,
+          "imageTag": "v2025-08-04"
         },
         "ais-proxy": {
           "enabled": true,
@@ -47,7 +48,8 @@
           "port": 3000,
           "cpu": 256,
           "memory": 512,
-          "priority": 2
+          "priority": 2,
+          "imageTag": "v2025-08-04"
         },
         "camera-proxy": {
           "enabled": true,
@@ -56,7 +58,8 @@
           "port": 3000,
           "cpu": 256,
           "memory": 512,
-          "priority": 3
+          "priority": 3,
+          "imageTag": "v2025-08-04"
         }
       },
       "general": {
@@ -64,8 +67,7 @@
         "enableDetailedLogging": true
       },
       "docker": {
-        "usePreBuiltImages": false,
-        "imageTag": "latest"
+        "usePreBuiltImages": false
       }
     },
     "prod": {
@@ -86,7 +88,8 @@
           "port": 3000,
           "cpu": 512,
           "memory": 1024,
-          "priority": 1
+          "priority": 1,
+          "imageTag": "v2025-08-04"
         },
         "ais-proxy": {
           "enabled": true,
@@ -95,7 +98,8 @@
           "port": 3000,
           "cpu": 512,
           "memory": 1024,
-          "priority": 2
+          "priority": 2,
+          "imageTag": "v2025-08-04"
         },
         "camera-proxy": {
           "enabled": true,
@@ -104,7 +108,8 @@
           "port": 3000,
           "cpu": 512,
           "memory": 1024,
-          "priority": 3
+          "priority": 3,
+          "imageTag": "v2025-08-04"
         }
       },
       "general": {
@@ -112,8 +117,7 @@
         "enableDetailedLogging": false
       },
       "docker": {
-        "usePreBuiltImages": true,
-        "imageTag": "latest"
+        "usePreBuiltImages": true
       }
     },
     "etl-utils-defaults": {

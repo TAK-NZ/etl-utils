@@ -74,17 +74,19 @@ jobs:
           ECR_REPO_NAME=$(echo $ECR_REPO_ARN | cut -d'/' -f2)
           ECR_REPO_URI="${{ secrets.DEMO_AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.DEMO_AWS_REGION }}.amazonaws.com/${ECR_REPO_NAME}"
           
-          VERSION=$(jq -r '.context."dev-test".docker.imageTag' cdk.json)
+          WEATHER_VERSION=$(jq -r '.context."dev-test".containers."weather-proxy".imageTag' cdk.json)
+          AIS_VERSION=$(jq -r '.context."dev-test".containers."ais-proxy".imageTag' cdk.json)
+          CAMERA_VERSION=$(jq -r '.context."dev-test".containers."camera-proxy".imageTag' cdk.json)
           
           if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            WEATHER_TAG="weather-proxy-${VERSION}-${TIMESTAMP}"
-            AIS_TAG="ais-proxy-${VERSION}-${TIMESTAMP}"
-            CAMERA_TAG="camera-proxy-${VERSION}-${TIMESTAMP}"
+            WEATHER_TAG="weather-proxy-${WEATHER_VERSION}-${TIMESTAMP}"
+            AIS_TAG="ais-proxy-${AIS_VERSION}-${TIMESTAMP}"
+            CAMERA_TAG="camera-proxy-${CAMERA_VERSION}-${TIMESTAMP}"
           else
-            WEATHER_TAG="weather-proxy-${VERSION}"
-            AIS_TAG="ais-proxy-${VERSION}"
-            CAMERA_TAG="camera-proxy-${VERSION}"
+            WEATHER_TAG="weather-proxy-${WEATHER_VERSION}"
+            AIS_TAG="ais-proxy-${AIS_VERSION}"
+            CAMERA_TAG="camera-proxy-${CAMERA_VERSION}"
           fi
           
           echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
