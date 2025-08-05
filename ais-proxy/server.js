@@ -10,28 +10,37 @@ const CONFIG_BUCKET = process.env.CONFIG_BUCKET;
 const CONFIG_KEY = process.env.CONFIG_KEY || 'ETL-Util-AIS-Proxy-Api-Keys.json';
 const DEBUG = process.env.DEBUG === 'true';
 const CACHE_FILE = '/data/vessel-cache.json';
-const PHOTO_CACHE_DIR = '/data/photos';
-const PHOTO_CACHE_INDEX = '/data/photo-cache.json';
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'ap-southeast-2' });
 
-// In-memory caches
+// In-memory caches with size limits
 const vesselCache = new Map();
 const apiKeyCache = new Map();
 const rateLimitCache = new Map();
+const MAX_VESSEL_CACHE_SIZE = 50000;
+const MAX_RATE_LIMIT_CACHE_SIZE = 10000;
 const nameLookupQueue = [];
 let nameLookupInProgress = false;
 
-// Photo cache
-const photoCache = new Map(); // mmsi -> { filename, downloadedAt, lastModified, picId }
-const photoUpdateQueue = [];
-let photoUpdateInProgress = false;
+
 
 const RATE_LIMIT_PER_MINUTE = 600;
-const NAME_LOOKUP_DELAY = 2000; // 2 seconds between lookups
-const PHOTO_CACHE_DAYS = 90;
-const PHOTO_UPDATE_DELAY = 1000; // 1 second between photo downloads
-const PHOTO_UPDATE_BATCH_SIZE = 50; // Process 50 photos per batch to spread over 24h
+const NAME_LOOKUP_DELAY = 5000; // 5 seconds between lookups (more conservative due to rate limiting)
+const MAX_LOOKUP_RETRIES = 3;
+const LOOKUP_BACKOFF_MULTIPLIER = 2;
+
+// Circuit breaker for VesselFinder API
+let circuitBreakerState = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
+let failureCount = 0;
+let lastFailureTime = null;
+const FAILURE_THRESHOLD = 5;
+const CIRCUIT_BREAKER_TIMEOUT = 300000; // 5 minutes
+
+// Sanitize log input to prevent log injection
+function sanitizeLogInput(input) {
+  if (typeof input !== 'string') return String(input);
+  return input.replace(/[\r\n\t]/g, ' ').replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+}
 
 // Load API keys from S3
 async function loadApiKeys() {
@@ -58,7 +67,7 @@ async function loadApiKeys() {
     apiKeyCache.set('keys', { data: keys, timestamp: Date.now() });
     return keys;
   } catch (error) {
-    console.error('Failed to load API keys from S3:', error.message);
+    console.error('Failed to load API keys from S3:', sanitizeLogInput(error.message || ''));
     const config = { aisstream: {}, users: {}, _publicMode: true };
     apiKeyCache.set('keys', { data: config, timestamp: Date.now() });
     return config;
@@ -92,6 +101,25 @@ async function validateUserApiKey(providedKey) {
   return { valid: false, reason: 'Invalid API key' };
 }
 
+// Cache cleanup to prevent memory issues
+function cleanupCaches() {
+  // Clean up rate limit cache
+  if (rateLimitCache.size > MAX_RATE_LIMIT_CACHE_SIZE) {
+    const entries = Array.from(rateLimitCache.entries());
+    entries.sort((a, b) => Math.max(...b[1]) - Math.max(...a[1]));
+    rateLimitCache.clear();
+    entries.slice(0, MAX_RATE_LIMIT_CACHE_SIZE / 2).forEach(([k, v]) => rateLimitCache.set(k, v));
+  }
+  
+  // Clean up vessel cache if too large
+  if (vesselCache.size > MAX_VESSEL_CACHE_SIZE) {
+    const entries = Array.from(vesselCache.entries());
+    entries.sort((a, b) => b[1].lastUpdate - a[1].lastUpdate);
+    vesselCache.clear();
+    entries.slice(0, MAX_VESSEL_CACHE_SIZE * 0.8).forEach(([k, v]) => vesselCache.set(k, v));
+  }
+}
+
 // Rate limiting
 function checkRateLimit(identifier, limit = RATE_LIMIT_PER_MINUTE) {
   const key = `rate_${identifier}`;
@@ -120,6 +148,10 @@ function loadCache() {
       
       for (const [mmsi, vessel] of Object.entries(cached)) {
         vessel.lastUpdate = new Date(vessel.lastUpdate);
+        // Fix date parsing for _nameLastLookup
+        if (vessel._nameLastLookup && typeof vessel._nameLastLookup === 'string') {
+          vessel._nameLastLookup = new Date(vessel._nameLastLookup);
+        }
         vesselCache.set(parseInt(mmsi), vessel);
         
         // Queue existing vessels that need lookup
@@ -145,9 +177,34 @@ function loadCache() {
       }
       
       console.log(`Loaded ${vesselCache.size} vessels from cache, queued ${queuedForLookup} for lookup`);
+      
+      // Diagnostic: Show some Class B vessels that need lookups
+      let classBCount = 0;
+      let classBWithoutNames = 0;
+      for (const [mmsi, vessel] of vesselCache.entries()) {
+        if (vessel._messageType === 'StandardClassBPositionReport' || vessel._messageType === 'ExtendedClassBPositionReport') {
+          classBCount++;
+          if (!vessel.NAME) {
+            classBWithoutNames++;
+            if (classBWithoutNames <= 5) { // Show first 5 examples
+              const lastLookup = vessel._nameLastLookup ? 
+                (vessel._nameLastLookup instanceof Date ? vessel._nameLastLookup.toISOString() : vessel._nameLastLookup) : 
+                'never';
+              console.log(`  Example Class B without name: MMSI ${mmsi}, last lookup: ${lastLookup}`);
+            }
+          }
+        }
+      }
+      console.log(`Class B vessels: ${classBCount} total, ${classBWithoutNames} without names`);
     }
   } catch (error) {
-    console.warn('Failed to load cache:', error.message);
+    if (error.code === 'ENOENT') {
+      console.info('Cache file does not exist, starting with empty cache');
+    } else if (error instanceof SyntaxError) {
+      console.error('Cache file contains invalid JSON:', sanitizeLogInput(error.message));
+    } else {
+      console.error('Failed to load cache:', sanitizeLogInput(error.message));
+    }
   }
 }
 
@@ -159,7 +216,7 @@ function saveCache() {
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cacheObj));
     if (DEBUG) console.log(`Saved ${vesselCache.size} vessels to cache`);
   } catch (error) {
-    console.warn('Failed to save cache:', error.message);
+    console.warn('Failed to save cache:', sanitizeLogInput(error.message || ''));
   }
 }
 
@@ -196,7 +253,7 @@ async function connectToAISStream() {
   const subscriptionMessage = {
     APIKey: apiKey,
     BoundingBoxes: [boundingBox],
-    FilterMessageTypes: ["PositionReport", "ShipStaticData", "StandardClassBPositionReport", "ExtendedClassBPositionReport", "AidsToNavigationReport"]
+    FilterMessageTypes: ["PositionReport", "ShipStaticData", "StandardClassBPositionReport", "ExtendedClassBPositionReport", "StaticDataReport", "AidsToNavigationReport"]
   };
 
   wsConnection = new WebSocket('wss://stream.aisstream.io/v0/stream');
@@ -219,7 +276,12 @@ async function connectToAISStream() {
       const message = JSON.parse(data.toString());
       processAISMessage(message);
     } catch (error) {
-      console.warn('Failed to parse AIS message:', error);
+      if (error instanceof SyntaxError) {
+        console.warn('Invalid JSON in AIS message:', sanitizeLogInput(error.message || ''));
+      } else {
+        console.warn('Failed to process AIS message:', sanitizeLogInput(error.message || ''));
+      }
+      if (DEBUG) console.warn('Raw data:', sanitizeLogInput(data.toString().substring(0, 200)));
     }
   });
   
@@ -234,12 +296,12 @@ async function connectToAISStream() {
   });
 
   wsConnection.on('error', (error) => {
-    console.error('WebSocket error:', error.message || error);
+    console.error('WebSocket error:', sanitizeLogInput(String(error.message || error)));
     scheduleReconnect();
   });
 
   wsConnection.on('close', (code, reason) => {
-    console.log(`WebSocket connection closed (code: ${code}, reason: ${reason || 'unknown'})`);
+    console.log(`WebSocket connection closed (code: ${code}, reason: ${sanitizeLogInput(String(reason || 'unknown'))})`);
     
     if (pingInterval) {
       clearInterval(pingInterval);
@@ -328,222 +390,105 @@ const VESSEL_TYPE_MAPPING = {
 // Track unknown vessel types for future mapping
 const unknownVesselTypes = new Set();
 
-// Initialize photo cache directory
-function initPhotoCache() {
-  try {
-    fs.mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
-  } catch (error) {
-    console.warn('Failed to create photo cache directory:', error.message);
-  }
-}
-
-// Load photo cache index
-function loadPhotoCache() {
-  try {
-    if (fs.existsSync(PHOTO_CACHE_INDEX)) {
-      const data = fs.readFileSync(PHOTO_CACHE_INDEX, 'utf8');
-      const cached = JSON.parse(data);
-      
-      for (const [mmsi, photoInfo] of Object.entries(cached)) {
-        photoInfo.downloadedAt = new Date(photoInfo.downloadedAt);
-        if (photoInfo.lastModified) {
-          photoInfo.lastModified = new Date(photoInfo.lastModified);
-        }
-        photoCache.set(parseInt(mmsi), photoInfo);
-      }
-      
-      console.log(`Loaded ${photoCache.size} photo cache entries`);
+// Check circuit breaker state
+function checkCircuitBreaker() {
+  if (circuitBreakerState === 'OPEN') {
+    if (Date.now() - lastFailureTime > CIRCUIT_BREAKER_TIMEOUT) {
+      circuitBreakerState = 'HALF_OPEN';
+      console.log('🔄 Circuit breaker moving to HALF_OPEN state');
+    } else {
+      return false; // Circuit is open, don't make requests
     }
-  } catch (error) {
-    console.warn('Failed to load photo cache:', error.message);
   }
+  return true;
 }
 
-// Save photo cache index
-function savePhotoCache() {
-  try {
-    const cacheObj = Object.fromEntries(photoCache);
-    fs.writeFileSync(PHOTO_CACHE_INDEX, JSON.stringify(cacheObj));
-  } catch (error) {
-    console.warn('Failed to save photo cache:', error.message);
-  }
-}
-
-// Get placeholder image path
-function getPlaceholderImagePath() {
-  return path.join(path.dirname(new URL(import.meta.url).pathname), 'static', 'novessel.png');
-}
-
-// Download vessel photo from VesselFinder
-async function downloadVesselPhoto(mmsi, picId) {
-  try {
-    const photoUrl = `https://static.vesselfinder.net/ship-photo/${picId}/1`;
-    const response = await fetch(photoUrl, {
-      timeout: 10000,
-      headers: { 'User-Agent': 'AIS-Proxy/1.0' }
-    });
-    
-    if (!response.ok) {
-      if (DEBUG) console.log(`Photo not found for MMSI ${mmsi}: ${response.status}`);
-      return null;
+// Record API success/failure for circuit breaker
+function recordApiResult(success) {
+  if (success) {
+    if (circuitBreakerState === 'HALF_OPEN') {
+      circuitBreakerState = 'CLOSED';
+      failureCount = 0;
+      console.log('✅ Circuit breaker reset to CLOSED state');
     }
+  } else {
+    failureCount++;
+    lastFailureTime = Date.now();
     
-    const lastModified = response.headers.get('last-modified');
-    const buffer = await response.arrayBuffer();
-    
-    return {
-      data: Buffer.from(buffer),
-      lastModified: lastModified ? new Date(lastModified) : null
-    };
-  } catch (error) {
-    if (DEBUG) console.warn(`Photo download failed for MMSI ${mmsi}:`, error.message);
+    if (failureCount >= FAILURE_THRESHOLD && circuitBreakerState === 'CLOSED') {
+      circuitBreakerState = 'OPEN';
+      console.warn(`🚫 Circuit breaker OPEN - too many failures (${failureCount}). Pausing lookups for ${CIRCUIT_BREAKER_TIMEOUT/1000}s`);
+    }
+  }
+}
+
+// Enhanced vessel lookup with retry logic
+async function lookupVesselData(mmsi, retryCount = 0) {
+  // Check circuit breaker
+  if (!checkCircuitBreaker()) {
+    if (DEBUG) console.log(`Circuit breaker OPEN - skipping lookup for MMSI ${mmsi}`);
     return null;
   }
-}
-
-// Cache vessel photo
-async function cacheVesselPhoto(mmsi, picId) {
-  const filename = `${mmsi}.jpg`;
-  const filepath = path.join(PHOTO_CACHE_DIR, filename);
-  
-  const photoResult = await downloadVesselPhoto(mmsi, picId);
-  if (!photoResult) return false;
-  
-  const photoData = photoResult.data || photoResult;
-  const lastModified = photoResult.lastModified || null;
   
   try {
-    fs.writeFileSync(filepath, photoData);
-    
-    const photoInfo = {
-      filename,
-      downloadedAt: new Date(),
-      lastModified,
-      picId
-    };
-    
-    photoCache.set(mmsi, photoInfo);
-    savePhotoCache();
-    
-    if (DEBUG) console.log(`Cached photo for MMSI ${mmsi}`);
-    return true;
-  } catch (error) {
-    console.warn(`Failed to cache photo for MMSI ${mmsi}:`, error.message);
-    return false;
-  }
-}
-
-// Check if photo needs update based on Last-Modified
-async function checkPhotoUpdate(mmsi, picId) {
-  try {
-    const photoUrl = `https://static.vesselfinder.net/ship-photo/${picId}/1`;
-    const response = await fetch(photoUrl, {
-      method: 'HEAD',
-      timeout: 5000,
-      headers: { 'User-Agent': 'AIS-Proxy/1.0' }
-    });
-    
-    if (!response.ok) return false;
-    
-    const lastModified = response.headers.get('last-modified');
-    if (!lastModified) return false;
-    
-    const photoInfo = photoCache.get(mmsi);
-    if (!photoInfo || !photoInfo.lastModified) return true;
-    
-    const serverModified = new Date(lastModified);
-    return serverModified > photoInfo.lastModified;
-  } catch (error) {
-    if (DEBUG) console.warn(`Photo update check failed for MMSI ${mmsi}:`, error.message);
-    return false;
-  }
-}
-
-// Clean up expired photos
-function cleanupExpiredPhotos() {
-  const expiredDate = new Date(Date.now() - (PHOTO_CACHE_DAYS * 24 * 60 * 60 * 1000));
-  let cleaned = 0;
-  
-  for (const [mmsi, photoInfo] of photoCache.entries()) {
-    if (photoInfo.downloadedAt < expiredDate) {
-      const filepath = path.join(PHOTO_CACHE_DIR, photoInfo.filename);
-      try {
-        fs.unlinkSync(filepath);
-        photoCache.delete(mmsi);
-        cleaned++;
-      } catch (error) {
-        console.warn(`Failed to delete expired photo for MMSI ${mmsi}:`, error.message);
-      }
+    // Validate MMSI to prevent SSRF
+    if (!Number.isInteger(mmsi) || mmsi < 100000000 || mmsi > 999999999) {
+      throw new Error('Invalid MMSI format');
     }
-  }
-  
-  if (cleaned > 0) {
-    console.log(`Cleaned up ${cleaned} expired photos`);
-    savePhotoCache();
-  }
-}
-
-// Process photo update queue (daily updates)
-async function processPhotoUpdateQueue() {
-  if (photoUpdateInProgress || photoUpdateQueue.length === 0) return;
-  
-  photoUpdateInProgress = true;
-  const batchSize = Math.min(PHOTO_UPDATE_BATCH_SIZE, photoUpdateQueue.length);
-  
-  for (let i = 0; i < batchSize; i++) {
-    const { mmsi, picId } = photoUpdateQueue.shift();
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
     
     try {
-      const needsUpdate = await checkPhotoUpdate(mmsi, picId);
-      if (needsUpdate) {
-        await cacheVesselPhoto(mmsi, picId);
-        if (DEBUG) console.log(`Updated photo for MMSI ${mmsi}`);
+      const response = await fetch(`https://www.vesselfinder.com/api/pub/click/${mmsi}`, {
+        signal: controller.signal,
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (compatible; AIS-Proxy/1.0)',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.status === 429 || response.status === 503) {
+        // Rate limited or service unavailable - retry with exponential backoff
+        if (retryCount < MAX_LOOKUP_RETRIES) {
+          const delay = NAME_LOOKUP_DELAY * Math.pow(LOOKUP_BACKOFF_MULTIPLIER, retryCount);
+          console.warn(`⏳ Rate limited for MMSI ${mmsi}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_LOOKUP_RETRIES})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return await lookupVesselData(mmsi, retryCount + 1);
+        } else {
+          console.warn(`❌ Max retries exceeded for MMSI ${mmsi} due to rate limiting`);
+          throw new Error(`Rate limited after ${MAX_LOOKUP_RETRIES} attempts`);
+        }
       }
-    } catch (error) {
-      console.warn(`Photo update failed for MMSI ${mmsi}:`, error.message);
+      
+      if (!response.ok) {
+        console.warn(`⚠️ VesselFinder API returned ${response.status} for MMSI ${mmsi}`);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      // Log successful response
+      console.log(`✅ VesselFinder response for MMSI ${mmsi}: ${data.name ? `"${data.name}"` : 'no name'} (${data.type || 'no type'})`);
+      
+      // Record successful API call
+      recordApiResult(true);
+      
+      // Check if we have a name - VesselFinder sometimes returns data without name
+      if (!data.name || data.name.trim() === '') {
+        if (DEBUG) console.log(`No name found for MMSI ${mmsi} in VesselFinder response`);
+        return null;
+      }
+      
+    } finally {
+      clearTimeout(timeoutId);
     }
-    
-    // Rate limit between requests
-    if (i < batchSize - 1) {
-      await new Promise(resolve => setTimeout(resolve, PHOTO_UPDATE_DELAY));
-    }
-  }
-  
-  photoUpdateInProgress = false;
-  
-  // Schedule next batch if more items remain
-  if (photoUpdateQueue.length > 0) {
-    const delay = Math.max(1000, (24 * 60 * 60 * 1000) / Math.ceil(photoCache.size / PHOTO_UPDATE_BATCH_SIZE));
-    setTimeout(processPhotoUpdateQueue, delay);
-  }
-}
-
-// Queue all cached photos for daily update check
-function queueDailyPhotoUpdates() {
-  photoUpdateQueue.length = 0; // Clear existing queue
-  
-  for (const [mmsi, photoInfo] of photoCache.entries()) {
-    if (photoInfo.picId) {
-      photoUpdateQueue.push({ mmsi, picId: photoInfo.picId });
-    }
-  }
-  
-  console.log(`Queued ${photoUpdateQueue.length} photos for daily update check`);
-  processPhotoUpdateQueue();
-}
-
-// Enhanced vessel lookup
-async function lookupVesselData(mmsi) {
-  try {
-    const response = await fetch(`https://www.vesselfinder.com/api/pub/click/${mmsi}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'AIS-Proxy/1.0' }
-    });
-    
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    if (!data.name) return null;
     
     // Map vessel type
     let aisType = null;
@@ -557,7 +502,7 @@ async function lookupVesselData(mmsi) {
       // Track unknown types for future mapping
       if (aisType === null && !unknownVesselTypes.has(typeKey)) {
         unknownVesselTypes.add(typeKey);
-        console.warn(`Unknown vessel type from VesselFinder: "${data.type}" (${typeKey})`);
+        console.warn(`Unknown vessel type from VesselFinder: "${sanitizeLogInput(String(data.type || ''))}" (${sanitizeLogInput(String(typeKey))})`);
       }
     }
     
@@ -569,21 +514,21 @@ async function lookupVesselData(mmsi) {
       grossTonnage: data.gt || null,
       deadweight: data.dw || null,
       yearBuilt: data.y || null,
-      typeText: data.type || null,
-      picId: data.pic || null
+      typeText: data.type || null
     };
-    
-    // Cache photo if pic ID is available and not already cached
-    if (data.pic && !photoCache.has(mmsi)) {
-      // Don't await - cache in background
-      cacheVesselPhoto(mmsi, data.pic).catch(error => {
-        if (DEBUG) console.warn(`Background photo caching failed for MMSI ${mmsi}:`, error.message);
-      });
-    }
     
     return result;
   } catch (error) {
-    if (DEBUG) console.warn(`Vessel lookup failed for MMSI ${mmsi}:`, error.message);
+    // Record failed API call
+    recordApiResult(false);
+    
+    if (error.name === 'AbortError') {
+      console.warn(`⏰ Lookup timeout for MMSI ${mmsi}`);
+    } else if (error.message.includes('Rate limited')) {
+      console.warn(`🚫 ${error.message} for MMSI ${mmsi}`);
+    } else {
+      console.warn(`❌ Vessel lookup failed for MMSI ${mmsi}:`, sanitizeLogInput(String(error.message)));
+    }
     return null;
   }
 }
@@ -598,27 +543,45 @@ async function processNameLookupQueue() {
     const mmsi = nameLookupQueue.shift();
     const vessel = vesselCache.get(mmsi);
     
-    if (!vessel) continue; // Skip if vessel gone
+    if (!vessel) {
+      console.warn(`⚠ Vessel ${mmsi} not found in cache during lookup processing`);
+      continue; // Skip if vessel gone
+    }
+    
+    console.log(`⚙️ Processing lookup for MMSI ${mmsi} (${nameLookupQueue.length} remaining in queue)`);
     
     // Skip if vessel already has both name and type, or if we only need name but already have it
     const needsName = !vessel.NAME && (vessel._messageType === 'StandardClassBPositionReport' || vessel._messageType === 'ExtendedClassBPositionReport');
     const needsType = vessel.TYPE === null && vessel._messageType !== 'AidsToNavigationReport';
     
-    if (!needsName && !needsType) continue;
+    if (!needsName && !needsType) {
+      console.log(`✓ MMSI ${mmsi} already has required data (name: "${vessel.NAME}", type: ${vessel.TYPE})`);
+      continue;
+    }
     
     if (DEBUG) console.log(`Looking up MMSI ${mmsi}: needs name=${needsName}, needs type=${needsType}`);
     
-    const vesselData = await lookupVesselData(mmsi);
+    let vesselData;
+    let lookupError = null;
+    try {
+      vesselData = await lookupVesselData(mmsi);
+    } catch (error) {
+      lookupError = error;
+      console.warn(`⚠ Vessel lookup failed for MMSI ${mmsi}:`, sanitizeLogInput(String(error.message)));
+      vesselData = null;
+    }
     if (vesselData) {
       // Update name if missing
       if (!vessel.NAME && vesselData.name) {
         vessel.NAME = vesselData.name;
         vessel._nameSource = 'lookup';
+        console.log(`✓ Found name for MMSI ${mmsi}: "${sanitizeLogInput(String(vesselData.name))}"`);
       }
       
       // Update type if missing
       if (vessel.TYPE === null && vesselData.type !== null) {
         vessel.TYPE = vesselData.type;
+        console.log(`✓ Found type for MMSI ${mmsi}: ${vesselData.type} (${sanitizeLogInput(String(vesselData.typeText))})`);
       }
       if (!vessel.IMO && vesselData.imo) vessel.IMO = vesselData.imo;
       
@@ -629,12 +592,20 @@ async function processNameLookupQueue() {
       vessel._lookupYearBuilt = vesselData.yearBuilt;
       vessel._lookupTypeText = vesselData.typeText;
       
-      if (DEBUG) console.log(`Enhanced data for MMSI ${mmsi}: ${vesselData.name} (${vesselData.typeText}) - AIS type: ${vesselData.type}`);
+      if (DEBUG) console.log(`Enhanced data for MMSI ${mmsi}: ${sanitizeLogInput(String(vesselData.name))} (${sanitizeLogInput(String(vesselData.typeText))}) - AIS type: ${vesselData.type}`);
     } else {
-      if (DEBUG) console.log(`No data found for MMSI ${mmsi}`);
+      console.warn(`⚠ No data found for MMSI ${mmsi} in VesselFinder`);
     }
     
-    vessel._nameLastLookup = new Date();
+    // Only update lookup timestamp if we got a successful response or a definitive "not found"
+    // Don't update if there was a network/API error, so we can retry sooner
+    if (vesselData || !lookupError) {
+      vessel._nameLastLookup = new Date();
+    } else {
+      // For errors, set a shorter retry interval
+      vessel._nameLastLookup = new Date(Date.now() - 82800000); // 23 hours ago, so retry in 1 hour
+      if (DEBUG) console.log(`Setting shorter retry interval for MMSI ${mmsi} due to lookup error`);
+    }
     
     // Rate limit: wait between requests
     if (nameLookupQueue.length > 0) {
@@ -649,10 +620,15 @@ async function processNameLookupQueue() {
 function queueNameLookup(mmsi) {
   if (!nameLookupQueue.includes(mmsi)) {
     nameLookupQueue.push(mmsi);
+    console.log(`→ Queued MMSI ${mmsi} for name lookup (queue length: ${nameLookupQueue.length})`);
     // Process queue in next tick to avoid blocking
     setImmediate(processNameLookupQueue);
+  } else {
+    if (DEBUG) console.log(`MMSI ${mmsi} already in lookup queue`);
   }
 }
+
+
 
 function processAISMessage(message) {
   try {
@@ -798,6 +774,47 @@ function processAISMessage(message) {
       vessel._valid = static_data.Valid;
     }
     
+    // Process Class B static data (Message Type 24)
+    if (message.Message.StaticDataReport) {
+      const static_data = message.Message.StaticDataReport;
+      
+      // Validate message if Valid field exists
+      if (static_data.Valid !== undefined && !static_data.Valid) {
+        if (DEBUG) console.warn(`Invalid Class B static data for MMSI ${mmsi}`);
+        return;
+      }
+      
+      // Message Type 24A contains name and call sign
+      if (static_data.PartNumber === 0) {
+        if (static_data.Name) {
+          vessel.NAME = static_data.Name.trim();
+          vessel._nameSource = 'ais';
+          console.log(`📡 Received Class B name from AIS for MMSI ${mmsi}: "${sanitizeLogInput(String(static_data.Name.trim()))}"`);
+        }
+        if (static_data.CallSign) {
+          vessel.CALLSIGN = static_data.CallSign.trim();
+        }
+      }
+      
+      // Message Type 24B contains type and dimensions
+      if (static_data.PartNumber === 1) {
+        if (static_data.Type !== undefined) {
+          vessel.TYPE = static_data.Type;
+          console.log(`📡 Received Class B type from AIS for MMSI ${mmsi}: ${static_data.Type}`);
+        }
+        
+        if (static_data.Dimension) {
+          if (static_data.Dimension.A !== undefined) vessel.A = static_data.Dimension.A;
+          if (static_data.Dimension.B !== undefined) vessel.B = static_data.Dimension.B;
+          if (static_data.Dimension.C !== undefined) vessel.C = static_data.Dimension.C;
+          if (static_data.Dimension.D !== undefined) vessel.D = static_data.Dimension.D;
+        }
+      }
+      
+      // Store additional internal fields
+      vessel._valid = static_data.Valid;
+    }
+    
     // Process navigation aids
     if (message.Message.AidsToNavigationReport) {
       const nav_aid = message.Message.AidsToNavigationReport;
@@ -844,25 +861,31 @@ function processAISMessage(message) {
     );
     
     if (needsLookup) {
-      const oneDayAgo = new Date(Date.now() - 86400000);
-      if (!vessel._nameLastLookup || vessel._nameLastLookup < oneDayAgo) {
-        if (DEBUG) console.log(`Queueing lookup for MMSI ${mmsi}: NAME=${vessel.NAME}, TYPE=${vessel.TYPE}, messageType=${vessel._messageType}`);
+      // More aggressive retry for vessels that failed lookup or have no data
+      const retryInterval = vessel._nameLastLookup ? 
+        (vessel.NAME || vessel.TYPE !== null ? 86400000 : 3600000) : // 24h if has some data, 1h if no data
+        0; // Immediate if never looked up
+      
+      const retryTime = new Date(Date.now() - retryInterval);
+      
+      if (!vessel._nameLastLookup || vessel._nameLastLookup < retryTime) {
+        if (DEBUG) console.log(`Queueing lookup for MMSI ${mmsi}: NAME="${sanitizeLogInput(String(vessel.NAME || ''))}", TYPE=${vessel.TYPE}, messageType=${sanitizeLogInput(String(vessel._messageType || ''))}, lastLookup=${vessel._nameLastLookup ? vessel._nameLastLookup.toISOString() : 'never'}`);
         queueNameLookup(mmsi);
       } else {
-        if (DEBUG) console.log(`Skipping lookup for MMSI ${mmsi}: last lookup was ${vessel._nameLastLookup}`);
+        if (DEBUG) console.log(`Skipping lookup for MMSI ${mmsi}: last lookup was ${vessel._nameLastLookup.toISOString()}, next retry after ${new Date(vessel._nameLastLookup.getTime() + retryInterval).toISOString()}`);
       }
-    } else {
-      if (DEBUG && (vessel.MMSI === 512009284 || vessel.MMSI === 512009382)) {
-        console.log(`Not queueing lookup for MMSI ${mmsi}: NAME=${vessel.NAME}, TYPE=${vessel.TYPE}, messageType=${vessel._messageType}`);
-      }
+    }
+    
+    if (DEBUG && (vessel.MMSI === 512009284 || vessel.MMSI === 512009382)) {
+      console.log(`Not queueing lookup for MMSI ${mmsi}: NAME=${sanitizeLogInput(String(vessel.NAME || ''))}, TYPE=${vessel.TYPE}, messageType=${sanitizeLogInput(String(vessel._messageType || ''))}`);
     }
     
     // Save cache occasionally
     if (Math.random() < 0.01) saveCache();
     
   } catch (error) {
-    console.warn('Error processing AIS message:', error.message);
-    if (DEBUG) console.warn('Message:', message);
+    console.warn('Error processing AIS message:', sanitizeLogInput(String(error.message)));
+    if (DEBUG) console.warn('Message:', sanitizeLogInput(JSON.stringify(message).substring(0, 200)));
   }
 }
 
@@ -885,6 +908,9 @@ setInterval(() => {
     }
   }
   
+  // Clean up caches to prevent memory issues
+  cleanupCaches();
+  
   if (removed > 0) {
     console.log(`Cleaned up ${removed} old vessels. Active: ${classA} Class A, ${classB} Class B, ${navigationAids} nav aids, ${unknown} other`);
     saveCache();
@@ -893,70 +919,9 @@ setInterval(() => {
   }
 }, 300000);
 
-// Clean up expired photos daily
-setInterval(cleanupExpiredPhotos, 24 * 60 * 60 * 1000);
-
-// Queue daily photo updates (spread over 24 hours)
-setInterval(queueDailyPhotoUpdates, 24 * 60 * 60 * 1000);
-
 setInterval(saveCache, 600000);
 
-// Ship photo endpoint
-app.get('/ais-proxy/ship-photo/:mmsi', async (req, res) => {
-  const mmsi = parseInt(req.params.mmsi);
-  
-  if (isNaN(mmsi)) {
-    return res.status(400).json({ error: 'Invalid MMSI' });
-  }
-  
-  const photoInfo = photoCache.get(mmsi);
-  
-  if (photoInfo) {
-    const filepath = path.join(PHOTO_CACHE_DIR, photoInfo.filename);
-    
-    try {
-      if (fs.existsSync(filepath)) {
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 1 day
-        return res.sendFile(path.resolve(filepath));
-      }
-    } catch (error) {
-      console.warn(`Failed to serve cached photo for MMSI ${mmsi}:`, error.message);
-    }
-  }
-  
-  // Try to get photo from vessel lookup if not cached
-  try {
-    const vesselData = await lookupVesselData(mmsi);
-    if (vesselData && vesselData.picId) {
-      // Cache the photo and serve it
-      const success = await cacheVesselPhoto(mmsi, vesselData.picId);
-      if (success) {
-        const filepath = path.join(PHOTO_CACHE_DIR, `${mmsi}.jpg`);
-        res.setHeader('Content-Type', 'image/jpeg');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        return res.sendFile(path.resolve(filepath));
-      }
-    }
-  } catch (error) {
-    console.warn(`Failed to lookup and cache photo for MMSI ${mmsi}:`, error.message);
-  }
-  
-  // Serve placeholder image
-  const placeholderPath = getPlaceholderImagePath();
-  try {
-    if (fs.existsSync(placeholderPath)) {
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache placeholder for 1 hour
-      return res.sendFile(path.resolve(placeholderPath));
-    }
-  } catch (error) {
-    console.warn('Failed to serve placeholder image:', error.message);
-  }
-  
-  // Fallback to 404 if placeholder not found
-  res.status(404).json({ error: 'Photo not available' });
-});
+
 
 // AISHub-compatible REST endpoint
 app.get('/ais-proxy/ws.php', async (req, res) => {
@@ -965,11 +930,11 @@ app.get('/ais-proxy/ws.php', async (req, res) => {
   // Validate user API key
   const keyValidation = await validateUserApiKey(username);
   if (!keyValidation.valid) {
-    return res.json({ ERROR: true });
+    return res.status(401).json({ ERROR: true, MESSAGE: 'Unauthorized' });
   }
   
   // Check rate limit
-  const rateLimitCheck = checkRateLimit(username, keyValidation.rateLimit);
+  const rateLimitCheck = checkRateLimit(username || 'anonymous', keyValidation.rateLimit);
   if (!rateLimitCheck.allowed) {
     return res.status(429).json({ ERROR: true, MESSAGE: rateLimitCheck.message });
   }
@@ -1028,7 +993,7 @@ app.get('/ais-proxy/v2/vessels', async (req, res) => {
   }
   
   // Check rate limit
-  const rateLimitCheck = checkRateLimit(username, keyValidation.rateLimit);
+  const rateLimitCheck = checkRateLimit(username || 'anonymous', keyValidation.rateLimit);
   if (!rateLimitCheck.allowed) {
     return res.status(429).json({ error: 'Rate limit exceeded', message: rateLimitCheck.message });
   }
@@ -1158,7 +1123,6 @@ app.get('/ais-proxy/health', async (req, res) => {
     res.json({ 
       status: 'ok', 
       vessels: vesselCache.size,
-      photos: photoCache.size,
       uptime: process.uptime(),
       user_keys_configured: enabledUserKeys,
       aisstream_key_configured: hasAISStreamKey,
@@ -1171,6 +1135,87 @@ app.get('/ais-proxy/health', async (req, res) => {
       message: 'Health check failed'
     });
   }
+});
+
+// Manual vessel lookup endpoint for debugging
+app.get('/ais-proxy/debug/lookup/:mmsi', async (req, res) => {
+  const mmsi = parseInt(req.params.mmsi);
+  const { username } = req.query;
+  
+  if (isNaN(mmsi)) {
+    return res.status(400).json({ error: 'Invalid MMSI' });
+  }
+  
+  // Validate user API key
+  const keyValidation = await validateUserApiKey(username);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  try {
+    console.log(`Manual lookup requested for MMSI ${mmsi}`);
+    const vesselData = await lookupVesselData(mmsi);
+    
+    const cachedVessel = vesselCache.get(mmsi);
+    
+    res.json({
+      mmsi,
+      lookupResult: vesselData,
+      cachedVessel: cachedVessel ? {
+        name: cachedVessel.NAME,
+        type: cachedVessel.TYPE,
+        nameSource: cachedVessel._nameSource,
+        lastLookup: cachedVessel._nameLastLookup,
+        messageType: cachedVessel._messageType,
+        lookupData: {
+          country: cachedVessel._lookupCountry,
+          typeText: cachedVessel._lookupTypeText,
+          grossTonnage: cachedVessel._lookupGrossTonnage
+        }
+      } : null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Lookup failed',
+      message: sanitizeLogInput(String(error.message)),
+      mmsi,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Force lookup queue for specific MMSI
+app.post('/ais-proxy/debug/queue-lookup/:mmsi', async (req, res) => {
+  const mmsi = parseInt(req.params.mmsi);
+  const { username } = req.query;
+  
+  if (isNaN(mmsi)) {
+    return res.status(400).json({ error: 'Invalid MMSI' });
+  }
+  
+  // Validate user API key
+  const keyValidation = await validateUserApiKey(username);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const vessel = vesselCache.get(mmsi);
+  if (!vessel) {
+    return res.status(404).json({ error: 'Vessel not found in cache' });
+  }
+  
+  // Reset last lookup time to force a new lookup
+  vessel._nameLastLookup = null;
+  
+  queueNameLookup(mmsi);
+  
+  res.json({
+    message: `Queued lookup for MMSI ${mmsi}`,
+    queueLength: nameLookupQueue.length,
+    inProgress: nameLookupInProgress,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Enhanced v2 health endpoint
@@ -1206,11 +1251,7 @@ app.get('/ais-proxy/v2/health', async (req, res) => {
         navigationAids,
         other
       },
-      photos: {
-        cached: photoCache.size,
-        queuedForUpdate: photoUpdateQueue.length,
-        updateInProgress: photoUpdateInProgress
-      },
+
       dataFreshness: {
         oldestUpdate: vesselCache.size > 0 ? oldestUpdate.toISOString() : null,
         newestUpdate: vesselCache.size > 0 ? newestUpdate.toISOString() : null
@@ -1225,6 +1266,15 @@ app.get('/ais-proxy/v2/health', async (req, res) => {
       websocket: {
         connected: wsConnection?.readyState === 1,
         reconnectAttempts
+      },
+      lookupQueue: {
+        nameLookupQueue: nameLookupQueue.length,
+        nameLookupInProgress
+      },
+      vesselFinderApi: {
+        circuitBreakerState,
+        failureCount,
+        lastFailureTime: lastFailureTime ? new Date(lastFailureTime).toISOString() : null
       },
       timestamp: new Date().toISOString()
     });
@@ -1264,11 +1314,26 @@ process.on('SIGINT', () => {
 
 app.listen(PORT, () => {
   console.log(`AIS Proxy server running on port ${PORT}`);
-  initPhotoCache();
   loadCache();
-  loadPhotoCache();
   connectToAISStream();
   
-  // Start daily photo updates after 1 hour
-  setTimeout(queueDailyPhotoUpdates, 60 * 60 * 1000);
+  // Diagnostic: Check if specific MMSI is in cache after startup
+  setTimeout(() => {
+    const testMMSI = 512209480;
+    const vessel = vesselCache.get(testMMSI);
+    if (vessel) {
+      console.log(`🔍 Diagnostic for MMSI ${testMMSI}:`);
+      console.log(`  Name: "${vessel.NAME}"`);
+      console.log(`  Type: ${vessel.TYPE}`);
+      console.log(`  Message Type: ${vessel._messageType}`);
+      console.log(`  Name Source: ${vessel._nameSource}`);
+      const lastLookup = vessel._nameLastLookup ? 
+        (vessel._nameLastLookup instanceof Date ? vessel._nameLastLookup.toISOString() : vessel._nameLastLookup) : 
+        'never';
+      console.log(`  Last Lookup: ${lastLookup}`);
+      console.log(`  In lookup queue: ${nameLookupQueue.includes(testMMSI)}`);
+    } else {
+      console.log(`🔍 MMSI ${testMMSI} not found in cache`);
+    }
+  }, 5000); // Check after 5 seconds
 });

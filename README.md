@@ -24,11 +24,10 @@ Weather radar proxy service providing access to real-time radar data from [Rain 
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
 ### ais-proxy
-AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with ship photo caching.
+AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with enhanced Class B vessel name lookup.
 
 - **Path**: `/ais-proxy/*`
 - **Health Check**: `/ais-proxy/health`
-- **Ship Photos**: `/ais-proxy/ship-photo/{mmsi}`
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
 ### camera-proxy
