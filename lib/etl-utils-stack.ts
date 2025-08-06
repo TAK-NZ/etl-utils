@@ -228,7 +228,7 @@ export class EtlUtilsStack extends cdk.Stack {
         const contextVarName = containerName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase()) + 'ImageTag';
         const contextImageTag = this.node.tryGetContext(contextVarName);
         const configImageTag = containerConfig.imageTag;
-        const imageTag = contextImageTag ?? configImageTag;
+        const imageTag = (contextImageTag && contextImageTag.trim() !== '') ? contextImageTag : configImageTag;
         
         if (!imageTag) {
           throw new Error(`No image tag found for container '${containerName}'. Context '${contextVarName}': ${contextImageTag}, Config: ${configImageTag}`);
@@ -238,7 +238,7 @@ export class EtlUtilsStack extends cdk.Stack {
         const ecrRepoArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ECR_ETL_REPO));
         // Extract repository name from ARN (format: arn:aws:ecr:region:account:repository/name)
         const ecrRepoName = Fn.select(1, Fn.split('/', ecrRepoArn));
-        containerImageUri = `${this.account}.dkr.ecr.${this.region}.amazonaws.com/${cdk.Token.asString(ecrRepoName)}:${imageTag}`;
+        containerImageUri = `${this.account}.dkr.ecr.${this.region}.amazonaws.com/${cdk.Token.asString(ecrRepoName)}:${containerName}-${imageTag}`;
       }
 
       // Add environment variables for S3 config access
