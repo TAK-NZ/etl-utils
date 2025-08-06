@@ -474,15 +474,15 @@ async function lookupVesselData(mmsi, retryCount = 0) {
       
       const data = await response.json();
       
-      // Log successful response
-      console.log(`✅ VesselFinder response for MMSI ${mmsi}: ${data.name ? `"${data.name}"` : 'no name'} (${data.type || 'no type'})`);
+      // Log successful response with full data for debugging
+      console.log(`✅ VesselFinder response for MMSI ${mmsi}:`, JSON.stringify(data));
       
       // Record successful API call
       recordApiResult(true);
       
       // Check if we have a name - VesselFinder sometimes returns data without name
       if (!data.name || data.name.trim() === '') {
-        if (DEBUG) console.log(`No name found for MMSI ${mmsi} in VesselFinder response`);
+        console.log(`⚠ No name found for MMSI ${mmsi} in VesselFinder response:`, JSON.stringify(data));
         return null;
       }
       
