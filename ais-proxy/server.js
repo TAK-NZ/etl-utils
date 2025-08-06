@@ -439,6 +439,7 @@ async function lookupVesselData(mmsi, retryCount = 0) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
     
+    let data;
     try {
       const response = await fetch(`https://www.vesselfinder.com/api/pub/click/${mmsi}`, {
         signal: controller.signal,
@@ -472,7 +473,7 @@ async function lookupVesselData(mmsi, retryCount = 0) {
         return null;
       }
       
-      const data = await response.json();
+      data = await response.json();
       
       // Log successful response with full data for debugging
       console.log(`✅ VesselFinder response for MMSI ${mmsi}:`, JSON.stringify(data));
@@ -481,7 +482,7 @@ async function lookupVesselData(mmsi, retryCount = 0) {
       recordApiResult(true);
       
       // Check if we have a name - VesselFinder sometimes returns data without name
-      if (!data.name || data.name.trim() === '') {
+      if (!data.name || (typeof data.name === 'string' && data.name.trim() === '')) {
         console.log(`⚠ No name found for MMSI ${mmsi} in VesselFinder response:`, JSON.stringify(data));
         return null;
       }
@@ -519,6 +520,7 @@ async function lookupVesselData(mmsi, retryCount = 0) {
       typeText: data.type || null
     };
     
+    console.log(`✅ Returning vessel data for MMSI ${mmsi}:`, JSON.stringify(result));
     return result;
   } catch (error) {
     // Record failed API call
@@ -573,7 +575,7 @@ async function processNameLookupQueue() {
       vesselData = null;
     }
     if (vesselData) {
-      console.log(`🔄 Updating vessel cache for MMSI ${mmsi} with lookup data:`, vesselData);
+      console.log(`🔄 Updating vessel cache for MMSI ${mmsi} with lookup data:`, JSON.stringify(vesselData));
       
       // Update name if missing
       if (!vessel.NAME && vesselData.name) {
@@ -602,7 +604,8 @@ async function processNameLookupQueue() {
       
       if (DEBUG) console.log(`Enhanced data for MMSI ${mmsi}: ${sanitizeLogInput(String(vesselData.name))} (${sanitizeLogInput(String(vesselData.typeText))}) - AIS type: ${vesselData.type}`);
     } else {
-      console.warn(`⚠ No data found for MMSI ${mmsi} in VesselFinder`);
+      console.warn(`⚠ No data found for MMSI ${mmsi} in VesselFinder - vesselData is:`, vesselData);
+      console.warn(`⚠ Lookup error was:`, lookupError ? lookupError.message : 'none');
     }
     
     // Only update lookup timestamp if we got a successful response or a definitive "not found"
