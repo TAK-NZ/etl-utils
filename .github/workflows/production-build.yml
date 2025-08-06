@@ -71,8 +71,8 @@ jobs:
           
           if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            WEATHER_TAG="weather-proxy-${WEATHER_VERSION}-${TIMESTAMP}"
-            AIS_TAG="ais-proxy-${AIS_VERSION}-${TIMESTAMP}"
+            WEATHER_TAG="weather-proxy-${TIMESTAMP}"
+            AIS_TAG="ais-proxy-${TIMESTAMP}"
           else
             WEATHER_TAG="weather-proxy-${WEATHER_VERSION}"
             AIS_TAG="ais-proxy-${AIS_VERSION}"
