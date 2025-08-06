@@ -100,7 +100,7 @@ jobs:
   revert-to-dev-test:
     runs-on: ubuntu-latest
     environment: demo
-    needs: [deploy-and-test]
+    needs: [deploy-and-test, build-images]
     if: always()
     steps:
       - name: Checkout
