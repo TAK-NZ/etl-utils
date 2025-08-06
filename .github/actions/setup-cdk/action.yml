@@ -28,6 +28,7 @@ runs:
         role-to-assume: ${{ inputs.aws-role-arn }}
         aws-region: ${{ inputs.aws-region }}
         role-session-name: ${{ inputs.role-session-name }}
+        role-duration-seconds: 3600  # 1 hour for long CDK deployments
 
     - name: Install dependencies
       shell: bash
