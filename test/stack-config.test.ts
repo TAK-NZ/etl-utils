@@ -10,7 +10,8 @@ describe('Stack Configuration Types', () => {
         port: 3000,
         cpu: 256,
         memory: 512,
-        priority: 1
+        priority: 1,
+        imageTag: 'v1.0.0'
       };
 
       expect(containerConfig.enabled).toBe(true);
@@ -30,7 +31,8 @@ describe('Stack Configuration Types', () => {
         port: 8080,
         cpu: 128,
         memory: 256,
-        priority: 10
+        priority: 10,
+        imageTag: 'v1.0.0'
       };
 
       expect(containerConfig.enabled).toBe(false);
@@ -44,7 +46,8 @@ describe('Stack Configuration Types', () => {
         port: 3000,
         cpu: 256,
         memory: 512,
-        priority: 1
+        priority: 1,
+        imageTag: 'v1.0.0'
       };
       
       expect(typeof config.enabled).toBe('boolean');
@@ -77,7 +80,8 @@ describe('Stack Configuration Types', () => {
             port: 3000,
             cpu: 256,
             memory: 512,
-            priority: 1
+            priority: 1,
+            imageTag: 'v1.0.0'
           }
         },
         general: {
@@ -121,7 +125,8 @@ describe('Stack Configuration Types', () => {
             port: 3000,
             cpu: 512,
             memory: 1024,
-            priority: 1
+            priority: 1,
+            imageTag: 'v1.0.0'
           },
           'container-2': {
             enabled: false,
@@ -130,7 +135,8 @@ describe('Stack Configuration Types', () => {
             port: 4000,
             cpu: 256,
             memory: 512,
-            priority: 2
+            priority: 2,
+            imageTag: 'v1.0.0'
           }
         },
         general: {
@@ -167,7 +173,8 @@ describe('Stack Configuration Types', () => {
             port: 3000,
             cpu: 256,
             memory: 512,
-            priority: 1
+            priority: 1,
+            imageTag: 'v1.0.0'
           }
         },
         general: {

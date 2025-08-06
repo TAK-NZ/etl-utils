@@ -14,6 +14,7 @@ export interface ContainerConfig {
   cpu: number;
   memory: number;
   priority: number;
+  imageTag: string;
 }
 
 /**
