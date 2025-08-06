@@ -25,7 +25,7 @@ describe('Context Overrides', () => {
       },
       docker: {
         usePreBuiltImages: false,
-        imageTag: 'latest'
+
       }
     };
   });
@@ -136,7 +136,7 @@ describe('Context Overrides', () => {
     
     const result = applyContextOverrides(app, baseConfig);
     
-    expect(result.docker.imageTag).toBe('v1.2.3');
+
     expect(result.general.removalPolicy).toBe('RETAIN');
   });
 });

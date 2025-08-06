@@ -22,7 +22,7 @@ describe('Tag Helpers', () => {
       },
       docker: {
         usePreBuiltImages: false,
-        imageTag: 'latest'
+
       }
     };
   });
