@@ -486,6 +486,8 @@ async function lookupVesselData(mmsi, retryCount = 0) {
         return null;
       }
       
+      console.log(`✅ Found vessel data for MMSI ${mmsi}: name="${data.name}", type="${data.type || 'unknown'}"`);
+      
     } finally {
       clearTimeout(timeoutId);
     }
@@ -571,17 +573,19 @@ async function processNameLookupQueue() {
       vesselData = null;
     }
     if (vesselData) {
+      console.log(`🔄 Updating vessel cache for MMSI ${mmsi} with lookup data:`, vesselData);
+      
       // Update name if missing
       if (!vessel.NAME && vesselData.name) {
         vessel.NAME = vesselData.name;
         vessel._nameSource = 'lookup';
-        console.log(`✓ Found name for MMSI ${mmsi}: "${sanitizeLogInput(String(vesselData.name))}"`);
+        console.log(`✓ Updated NAME for MMSI ${mmsi}: "${sanitizeLogInput(String(vesselData.name))}"`);
       }
       
       // Update type if missing
       if (vessel.TYPE === null && vesselData.type !== null) {
         vessel.TYPE = vesselData.type;
-        console.log(`✓ Found type for MMSI ${mmsi}: ${vesselData.type} (${sanitizeLogInput(String(vesselData.typeText))})`);
+        console.log(`✓ Updated TYPE for MMSI ${mmsi}: ${vesselData.type} (${sanitizeLogInput(String(vesselData.typeText))})`);
       }
       if (!vessel.IMO && vesselData.imo) vessel.IMO = vesselData.imo;
       
@@ -591,6 +595,10 @@ async function processNameLookupQueue() {
       vessel._lookupDeadweight = vesselData.deadweight;
       vessel._lookupYearBuilt = vesselData.yearBuilt;
       vessel._lookupTypeText = vesselData.typeText;
+      
+      // Force cache update
+      vesselCache.set(mmsi, vessel);
+      console.log(`✅ Cache updated for MMSI ${mmsi}: NAME="${vessel.NAME}", TYPE=${vessel.TYPE}`);
       
       if (DEBUG) console.log(`Enhanced data for MMSI ${mmsi}: ${sanitizeLogInput(String(vesselData.name))} (${sanitizeLogInput(String(vesselData.typeText))}) - AIS type: ${vesselData.type}`);
     } else {
