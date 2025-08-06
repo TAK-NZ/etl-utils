@@ -224,7 +224,9 @@ export class EtlUtilsStack extends cdk.Stack {
       // Determine container image URI for dual image strategy
       let containerImageUri: string | undefined;
       if (usePreBuiltImages) {
-        const imageTag = this.node.tryGetContext(`${containerName}ImageTag`) ?? envConfig.docker.imageTag;
+        // Convert container name to camelCase for context variable (weather-proxy -> weatherProxy)
+        const contextVarName = containerName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase()) + 'ImageTag';
+        const imageTag = this.node.tryGetContext(contextVarName) ?? containerConfig.imageTag ?? envConfig.docker.imageTag;
         // Get ECR repository ARN from BaseInfra and extract repository name
         const ecrRepoArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ECR_ETL_REPO));
         // Extract repository name from ARN (format: arn:aws:ecr:region:account:repository/name)

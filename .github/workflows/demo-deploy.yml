@@ -81,8 +81,8 @@ jobs:
             --context envType=prod \
             --context stackName=${{ vars.DEMO_STACK_NAME }} \
             --context usePreBuiltImages=true \
-            --context weather-proxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
-            --context ais-proxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
+            --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
             --require-approval never
 
       - name: Wait for Testing Period
@@ -122,6 +122,6 @@ jobs:
             --context envType=dev-test \
             --context stackName=${{ vars.DEMO_STACK_NAME }} \
             --context usePreBuiltImages=true \
-            --context weather-proxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
-            --context ais-proxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
+            --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
             --require-approval never
