@@ -30,13 +30,7 @@ AISHub-compatible proxy service providing access to real-time AIS vessel data fr
 - **Health Check**: `/ais-proxy/health`
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
-### camera-proxy
-Camera proxy service that converts static images into MJPEG video streams by downloading images at regular intervals.
 
-- **Path**: `/camera-proxy/*`
-- **Health Check**: `/camera-proxy/health`
-- **HLS Playlist**: `/camera-proxy/stream/playlist.m3u8?url={image_url}`
-- **Documentation**: [Camera Proxy API](docs/CAMERA_PROXY.md)
 
 ## Configuration
 
@@ -59,12 +53,6 @@ Environment-specific configuration is managed in `cdk.json`:
         "path": "/ais-proxy",
         "port": 3000,
         "priority": 2
-      },
-      "camera-proxy": {
-        "enabled": true,
-        "path": "/camera-proxy",
-        "port": 3000,
-        "priority": 3
       }
     }
   }
@@ -116,7 +104,7 @@ Example container configuration:
   "port": 8080,
   "cpu": 256,
   "memory": 512,
-  "priority": 2
+  "priority": 3
 }
 ```
 
