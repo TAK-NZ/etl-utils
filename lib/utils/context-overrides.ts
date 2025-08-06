@@ -33,7 +33,7 @@ export function applyContextOverrides(
     docker: {
       ...baseConfig.docker,
       usePreBuiltImages: parseContextBoolean(app.node.tryGetContext('usePreBuiltImages')) ?? baseConfig.docker.usePreBuiltImages,
-      imageTag: app.node.tryGetContext('imageTag') ?? baseConfig.docker.imageTag,
+
     },
   };
 }
