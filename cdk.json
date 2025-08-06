@@ -50,16 +50,6 @@
           "memory": 512,
           "priority": 2,
           "imageTag": "v2025-08-04"
-        },
-        "camera-proxy": {
-          "enabled": true,
-          "path": "/camera-proxy",
-          "healthCheckPath": "/camera-proxy/health",
-          "port": 3000,
-          "cpu": 256,
-          "memory": 512,
-          "priority": 3,
-          "imageTag": "v2025-08-04"
         }
       },
       "general": {
@@ -99,16 +89,6 @@
           "cpu": 512,
           "memory": 1024,
           "priority": 2,
-          "imageTag": "v2025-08-04"
-        },
-        "camera-proxy": {
-          "enabled": true,
-          "path": "/camera-proxy",
-          "healthCheckPath": "/camera-proxy/health",
-          "port": 3000,
-          "cpu": 512,
-          "memory": 1024,
-          "priority": 3,
           "imageTag": "v2025-08-04"
         }
       },

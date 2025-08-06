@@ -6,7 +6,6 @@ on:
     paths:
       - 'weather-proxy/**'
       - 'ais-proxy/**'
-      - 'camera-proxy/**'
       - 'cdk.json'
   workflow_call:
     inputs:
@@ -22,9 +21,6 @@ on:
       ais-proxy-tag:
         description: 'AIS proxy image tag'
         value: ${{ jobs.build-images.outputs.ais-proxy-tag }}
-      camera-proxy-tag:
-        description: 'Camera proxy image tag'
-        value: ${{ jobs.build-images.outputs.camera-proxy-tag }}
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -44,7 +40,6 @@ jobs:
     outputs:
       weather-proxy-tag: ${{ steps.tags.outputs.weather-proxy-tag }}
       ais-proxy-tag: ${{ steps.tags.outputs.ais-proxy-tag }}
-      camera-proxy-tag: ${{ steps.tags.outputs.camera-proxy-tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,36 +71,30 @@ jobs:
           
           WEATHER_VERSION=$(jq -r '.context."dev-test".containers."weather-proxy".imageTag' cdk.json)
           AIS_VERSION=$(jq -r '.context."dev-test".containers."ais-proxy".imageTag' cdk.json)
-          CAMERA_VERSION=$(jq -r '.context."dev-test".containers."camera-proxy".imageTag' cdk.json)
           
           if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             WEATHER_TAG="weather-proxy-${WEATHER_VERSION}-${TIMESTAMP}"
             AIS_TAG="ais-proxy-${AIS_VERSION}-${TIMESTAMP}"
-            CAMERA_TAG="camera-proxy-${CAMERA_VERSION}-${TIMESTAMP}"
           else
             WEATHER_TAG="weather-proxy-${WEATHER_VERSION}"
             AIS_TAG="ais-proxy-${AIS_VERSION}"
-            CAMERA_TAG="camera-proxy-${CAMERA_VERSION}"
           fi
           
           echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
           echo "weather-proxy-tag=$WEATHER_TAG" >> $GITHUB_OUTPUT
           echo "ais-proxy-tag=$AIS_TAG" >> $GITHUB_OUTPUT
-          echo "camera-proxy-tag=$CAMERA_TAG" >> $GITHUB_OUTPUT
           echo "Using ECR repository: $ECR_REPO_URI"
-          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG, $CAMERA_TAG"
+          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG"
       
       - name: Check Enabled Containers
         id: containers
         run: |
           WEATHER_ENABLED=$(jq -r '.context."dev-test".containers."weather-proxy".enabled' cdk.json)
           AIS_ENABLED=$(jq -r '.context."dev-test".containers."ais-proxy".enabled' cdk.json)
-          CAMERA_ENABLED=$(jq -r '.context."dev-test".containers."camera-proxy".enabled' cdk.json)
           
           echo "weather-enabled=$WEATHER_ENABLED" >> $GITHUB_OUTPUT
           echo "ais-enabled=$AIS_ENABLED" >> $GITHUB_OUTPUT
-          echo "camera-enabled=$CAMERA_ENABLED" >> $GITHUB_OUTPUT
       
       - name: Login to Amazon ECR
         run: |
@@ -141,17 +130,7 @@ jobs:
             fi
           fi
           
-          # Build camera-proxy if enabled
-          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
-            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.camera-proxy-tag }} >/dev/null 2>&1; then
-              echo "✅ Camera proxy image already exists, skipping build"
-            else
-              echo "🔨 Building camera-proxy image"
-              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }} ./camera-proxy
-              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.camera-proxy-tag }}
-              echo "✅ Camera proxy image pushed"
-            fi
-          fi
+
       
       - name: Output Image Information
         run: |
@@ -161,9 +140,6 @@ jobs:
           fi
           if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
             echo "📦 AIS Proxy: ${{ steps.tags.outputs.ais-proxy-tag }}"
-          fi
-          if [[ "${{ steps.containers.outputs.camera-enabled }}" == "true" ]]; then
-            echo "📦 Camera Proxy: ${{ steps.tags.outputs.camera-proxy-tag }}"
           fi
           echo ""
           echo "🚀 To deploy with these images, use:"
