@@ -47,7 +47,8 @@ export function createTestApp(): cdk.App {
             port: 3000,
             cpu: 256,
             memory: 512,
-            priority: 1
+            priority: 1,
+            imageTag: 'v2025-08-04'
           },
           'ais-proxy': {
             enabled: true,
@@ -56,7 +57,8 @@ export function createTestApp(): cdk.App {
             port: 3000,
             cpu: 256,
             memory: 512,
-            priority: 2
+            priority: 2,
+            imageTag: 'v2025-08-04'
           }
         },
         general: {
@@ -67,8 +69,7 @@ export function createTestApp(): cdk.App {
           enableEcsExec: false
         },
         docker: {
-          usePreBuiltImages: false,
-          imageTag: 'latest'
+          usePreBuiltImages: false
         }
       },
       'prod': {
@@ -82,7 +83,8 @@ export function createTestApp(): cdk.App {
             port: 3000,
             cpu: 512,
             memory: 1024,
-            priority: 1
+            priority: 1,
+            imageTag: 'v2025-08-04'
           },
           'ais-proxy': {
             enabled: true,
@@ -91,7 +93,8 @@ export function createTestApp(): cdk.App {
             port: 3000,
             cpu: 512,
             memory: 1024,
-            priority: 2
+            priority: 2,
+            imageTag: 'v2025-08-04'
           }
         },
         general: {
@@ -102,8 +105,7 @@ export function createTestApp(): cdk.App {
           enableEcsExec: true
         },
         docker: {
-          usePreBuiltImages: true,
-          imageTag: 'v1.0.0'
+          usePreBuiltImages: true
         }
       },
       'tak-defaults': {

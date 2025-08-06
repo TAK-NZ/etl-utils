@@ -226,7 +226,14 @@ export class EtlUtilsStack extends cdk.Stack {
       if (usePreBuiltImages) {
         // Convert container name to camelCase for context variable (weather-proxy -> weatherProxy)
         const contextVarName = containerName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase()) + 'ImageTag';
-        const imageTag = this.node.tryGetContext(contextVarName) ?? containerConfig.imageTag;
+        const contextImageTag = this.node.tryGetContext(contextVarName);
+        const configImageTag = containerConfig.imageTag;
+        const imageTag = contextImageTag ?? configImageTag;
+        
+        if (!imageTag) {
+          throw new Error(`No image tag found for container '${containerName}'. Context '${contextVarName}': ${contextImageTag}, Config: ${configImageTag}`);
+        }
+        
         // Get ECR repository ARN from BaseInfra and extract repository name
         const ecrRepoArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ECR_ETL_REPO));
         // Extract repository name from ARN (format: arn:aws:ecr:region:account:repository/name)
