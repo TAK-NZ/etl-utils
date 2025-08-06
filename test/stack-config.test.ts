@@ -89,8 +89,7 @@ describe('Stack Configuration Types', () => {
           enableDetailedLogging: true
         },
         docker: {
-          usePreBuiltImages: false,
-          imageTag: 'latest'
+          usePreBuiltImages: false
         }
       };
 
@@ -144,8 +143,7 @@ describe('Stack Configuration Types', () => {
           enableDetailedLogging: false
         },
         docker: {
-          usePreBuiltImages: true,
-          imageTag: 'v1.2.3'
+          usePreBuiltImages: true
         }
       };
 
@@ -182,8 +180,7 @@ describe('Stack Configuration Types', () => {
           enableDetailedLogging: true
         },
         docker: {
-          usePreBuiltImages: false,
-          imageTag: 'latest'
+          usePreBuiltImages: false
         }
       };
       
