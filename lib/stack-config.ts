@@ -39,6 +39,5 @@ export interface ContextEnvironmentConfig {
   };
   docker: {
     usePreBuiltImages: boolean;
-    imageTag: string;
   };
 }
