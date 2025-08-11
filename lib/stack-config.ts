@@ -41,4 +41,14 @@ export interface ContextEnvironmentConfig {
   docker: {
     usePreBuiltImages: boolean;
   };
+  cloudfront?: {
+    tileserver?: {
+      enabled: boolean;
+      cacheTtl?: {
+        tiles?: string;
+        metadata?: string;
+        health?: string;
+      };
+    };
+  };
 }

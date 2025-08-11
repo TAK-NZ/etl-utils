@@ -33,9 +33,10 @@ AISHub-compatible proxy service providing access to real-time AIS vessel data fr
 ### tileserver-gl
 MapTiler TileServer GL providing vector and raster tile services for New Zealand topographic maps.
 
-- **Path**: `/tiles/*`
-- **Health Check**: `/tiles/health`
+- **Hostname**: `tiles.{domain}`
+- **Health Check**: `/health`
 - **Documentation**: [TileServer GL API](docs/TILESERVER_GL.md)
+- **CloudFront CDN**: [CloudFront Setup](docs/CLOUDFRONT.md) ✨ **NEW**
 
 
 
@@ -63,7 +64,7 @@ Environment-specific configuration is managed in `cdk.json`:
       },
       "tileserver-gl": {
         "enabled": true,
-        "path": "/tiles",
+        "hostname": "tiles",
         "port": 8080,
         "priority": 3
       }
@@ -78,6 +79,7 @@ Following the TAK-NZ pattern, this stack supports both local Docker builds and p
 
 - **Development**: Uses local Docker builds from container folders
 - **Production**: Uses pre-built images from ECR with tags
+- **CloudFront**: Optional CDN for tileserver with global performance benefits
 
 ## Prerequisites
 
@@ -145,6 +147,7 @@ This stack imports resources from the base infrastructure:
 - **Private Subnets** - ECS tasks deployed in private subnets
 - **IAM Roles** - Least privilege access for ECS tasks
 - **HTTPS Only** - HTTP traffic redirected to HTTPS
+- **CloudFront** - Additional SSL termination and DDoS protection
 
 ## Auto Scaling (Production)
 

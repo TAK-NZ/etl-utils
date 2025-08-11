@@ -34,6 +34,15 @@ export interface CloudFrontProps {
    * Hostname for the tiles service
    */
   hostname: string;
+
+  /**
+   * Cache TTL configuration
+   */
+  cacheTtl?: {
+    tiles?: string;
+    metadata?: string;
+    health?: string;
+  };
 }
 
 /**
@@ -53,22 +62,46 @@ export class CloudFront extends Construct {
   constructor(scope: Construct, id: string, props: CloudFrontProps) {
     super(scope, id);
 
-    const { albDomainName, certificate, hostedZone, hostname } = props;
+    const { albDomainName, certificate, hostedZone, hostname, cacheTtl } = props;
 
     // Create origin for ALB
     const albOrigin = new origins.HttpOrigin(albDomainName, {
       protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
-      customHeaders: {
-        'Host': `${hostname}.${hostedZone.zoneName}`,
-      },
     });
+
+    // Create origin request policy to forward Host header
+    const originRequestPolicy = new cloudfront.OriginRequestPolicy(this, 'OriginRequestPolicy', {
+      originRequestPolicyName: 'TileServerGL-OriginRequest',
+      headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList('Host'),
+      queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all(),
+      cookieBehavior: cloudfront.OriginRequestCookieBehavior.none(),
+    });
+
+    // Parse cache TTL values
+    const parseTtl = (ttl: string): Duration => {
+      const match = ttl.match(/^(\d+)([dhms])$/);
+      if (!match) return Duration.hours(1);
+      const [, value, unit] = match;
+      const num = parseInt(value);
+      switch (unit) {
+        case 'd': return Duration.days(num);
+        case 'h': return Duration.hours(num);
+        case 'm': return Duration.minutes(num);
+        case 's': return Duration.seconds(num);
+        default: return Duration.hours(1);
+      }
+    };
+
+    const tileTtl = cacheTtl?.tiles ? parseTtl(cacheTtl.tiles) : Duration.days(30);
+    const metadataTtl = cacheTtl?.metadata ? parseTtl(cacheTtl.metadata) : Duration.hours(1);
+    const healthTtl = cacheTtl?.health ? parseTtl(cacheTtl.health) : Duration.seconds(0);
 
     // Create cache policies
     const tileCachePolicy = new cloudfront.CachePolicy(this, 'TileCachePolicy', {
       cachePolicyName: 'TileServerGL-Tiles',
-      defaultTtl: Duration.days(30),
+      defaultTtl: tileTtl,
       maxTtl: Duration.days(365),
-      minTtl: Duration.days(1),
+      minTtl: tileTtl.toSeconds() < 86400 ? Duration.seconds(0) : Duration.days(1), // Adjust minTtl if defaultTtl is less than 1 day
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
@@ -76,9 +109,9 @@ export class CloudFront extends Construct {
 
     const metadataCachePolicy = new cloudfront.CachePolicy(this, 'MetadataCachePolicy', {
       cachePolicyName: 'TileServerGL-Metadata',
-      defaultTtl: Duration.hours(1),
-      maxTtl: Duration.days(1),
-      minTtl: Duration.minutes(1),
+      defaultTtl: metadataTtl,
+      maxTtl: metadataTtl.toSeconds() > 86400 ? metadataTtl : Duration.days(1), // Adjust maxTtl if defaultTtl is greater than 1 day
+      minTtl: metadataTtl.toSeconds() < 60 ? Duration.seconds(0) : Duration.minutes(1), // Adjust minTtl if defaultTtl is less than 1 minute
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
@@ -86,8 +119,8 @@ export class CloudFront extends Construct {
 
     const noCachePolicy = new cloudfront.CachePolicy(this, 'NoCachePolicy', {
       cachePolicyName: 'TileServerGL-NoCache',
-      defaultTtl: Duration.seconds(0),
-      maxTtl: Duration.seconds(1),
+      defaultTtl: healthTtl,
+      maxTtl: healthTtl.toSeconds() > 1 ? healthTtl : Duration.seconds(1),
       minTtl: Duration.seconds(0),
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.all(),
@@ -101,21 +134,16 @@ export class CloudFront extends Construct {
       defaultBehavior: {
         origin: albOrigin,
         cachePolicy: metadataCachePolicy,
+        originRequestPolicy,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
       },
       additionalBehaviors: {
-        // Tile endpoints - long cache
-        '/styles/*/tiles/*': {
+        // All tile images - long cache (covers all image formats and path depths)
+        '/styles/*': {
           origin: albOrigin,
           cachePolicy: tileCachePolicy,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
-        },
-        // Rendered tiles - long cache
-        '/styles/*/*.png': {
-          origin: albOrigin,
-          cachePolicy: tileCachePolicy,
+          originRequestPolicy,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
         },
@@ -123,6 +151,7 @@ export class CloudFront extends Construct {
         '/health': {
           origin: albOrigin,
           cachePolicy: noCachePolicy,
+          originRequestPolicy,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
         },
@@ -130,22 +159,5 @@ export class CloudFront extends Construct {
     });
 
     this.domainName = this.distribution.distributionDomainName;
-
-    // Create Route53 record pointing to CloudFront
-    new route53.ARecord(this, 'ARecord', {
-      zone: hostedZone,
-      recordName: hostname,
-      target: route53.RecordTarget.fromAlias(
-        new targets.CloudFrontTarget(this.distribution)
-      ),
-    });
-
-    new route53.AaaaRecord(this, 'AaaaRecord', {
-      zone: hostedZone,
-      recordName: hostname,
-      target: route53.RecordTarget.fromAlias(
-        new targets.CloudFrontTarget(this.distribution)
-      ),
-    });
   }
 }

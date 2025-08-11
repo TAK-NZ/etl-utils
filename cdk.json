@@ -69,6 +69,16 @@
       },
       "docker": {
         "usePreBuiltImages": false
+      },
+      "cloudfront": {
+        "tileserver": {
+          "enabled": true,
+          "cacheTtl": {
+            "tiles": "30d",
+            "metadata": "1h",
+            "health": "0s"
+          }
+        }
       }
     },
     "prod": {
@@ -120,6 +130,16 @@
       },
       "docker": {
         "usePreBuiltImages": true
+      },
+      "cloudfront": {
+        "tileserver": {
+          "enabled": true,
+          "cacheTtl": {
+            "tiles": "30d",
+            "metadata": "1h",
+            "health": "0s"
+          }
+        }
       }
     },
     "etl-utils-defaults": {

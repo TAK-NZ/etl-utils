@@ -6,12 +6,14 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53_targets from 'aws-cdk-lib/aws-route53-targets';
+import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as efs from 'aws-cdk-lib/aws-efs';
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
 import { Alb } from './constructs/alb';
 import { ContainerService } from './constructs/container-service';
+import { CloudFront } from './constructs/cloudfront';
 
 // Utility imports
 import { ContextEnvironmentConfig } from './stack-config';
@@ -130,21 +132,6 @@ export class EtlUtilsStack extends cdk.Stack {
       }
     });
 
-    // Create EFS access point for MapProxy cache
-    const mapproxyCacheAccessPoint = new efs.AccessPoint(this, 'MapproxyCacheAccessPoint', {
-      fileSystem: efsFileSystem,
-      posixUser: {
-        uid: '1000',
-        gid: '1000'
-      },
-      path: '/mapproxy-cache',
-      createAcl: {
-        ownerUid: '1000',
-        ownerGid: '1000',
-        permissions: '755'
-      }
-    });
-
     // =================
     // CREATE APPLICATION LOAD BALANCER
     // =================
@@ -217,8 +204,7 @@ export class EtlUtilsStack extends cdk.Stack {
       ],
       resources: [
         `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${efsFileSystem.fileSystemId}`,
-        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`,
-        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${mapproxyCacheAccessPoint.accessPointId}`
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`
       ]
     }));
 
@@ -283,8 +269,7 @@ export class EtlUtilsStack extends cdk.Stack {
         containerImageUri,
         environmentVariables,
         stackNameComponent,
-        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : 
-                       containerName === 'mapproxy' ? mapproxyCacheAccessPoint : undefined,
+        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : undefined,
       });
 
       containerServices[containerName] = containerService;
@@ -299,22 +284,65 @@ export class EtlUtilsStack extends cdk.Stack {
           containerConfig.priority || 100
         );
         
-        // Create Route53 record for hostname (CloudFront disabled for now)
-        new route53.ARecord(this, `${containerName}ARecord`, {
-          zone: hostedZone,
-          recordName: containerConfig.hostname,
-          target: route53.RecordTarget.fromAlias(
-            new route53_targets.LoadBalancerTarget(alb.loadBalancer)
-          ),
-        });
+        // Create CloudFront distribution for tileserver if enabled
+        if (containerName === 'tileserver-gl' && envConfig.cloudfront?.tileserver?.enabled) {
+          // Create us-east-1 certificate for CloudFront
+          const cloudFrontCertificate = new acm.DnsValidatedCertificate(this, 'CloudFrontCertificate', {
+            domainName: `${containerConfig.hostname}.${hostedZone.zoneName}`,
+            hostedZone,
+            region: 'us-east-1',
+          });
 
-        new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
-          zone: hostedZone,
-          recordName: containerConfig.hostname,
-          target: route53.RecordTarget.fromAlias(
-            new route53_targets.LoadBalancerTarget(alb.loadBalancer)
-          ),
-        });
+          // Create CloudFront distribution
+          const cloudFront = new CloudFront(this, 'TileServerCloudFront', {
+            albDomainName: alb.dnsName,
+            certificate: cloudFrontCertificate,
+            hostedZone,
+            hostname: containerConfig.hostname,
+            cacheTtl: envConfig.cloudfront.tileserver.cacheTtl,
+          });
+
+          // Create Route53 records pointing to CloudFront
+          new route53.ARecord(this, `${containerName}ARecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new targets.CloudFrontTarget(cloudFront.distribution)
+            ),
+          });
+
+          new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new targets.CloudFrontTarget(cloudFront.distribution)
+            ),
+          });
+
+          // Output CloudFront domain
+          new cdk.CfnOutput(this, 'CloudFrontDomain', {
+            value: cloudFront.domainName,
+            description: 'CloudFront distribution domain name',
+            exportName: `${id}-CloudFrontDomain`,
+          });
+        } else {
+          // Create Route53 record for hostname (direct ALB)
+          new route53.ARecord(this, `${containerName}ARecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+            ),
+          });
+
+          new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+            ),
+          });
+        }
       } else if (containerConfig.path) {
         // Path-based routing
         alb.addContainerRule(
