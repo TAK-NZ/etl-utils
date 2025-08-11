@@ -5,9 +5,9 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53_targets from 'aws-cdk-lib/aws-route53-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as efs from 'aws-cdk-lib/aws-efs';
-
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
 import { Alb } from './constructs/alb';
@@ -130,6 +130,21 @@ export class EtlUtilsStack extends cdk.Stack {
       }
     });
 
+    // Create EFS access point for MapProxy cache
+    const mapproxyCacheAccessPoint = new efs.AccessPoint(this, 'MapproxyCacheAccessPoint', {
+      fileSystem: efsFileSystem,
+      posixUser: {
+        uid: '1000',
+        gid: '1000'
+      },
+      path: '/mapproxy-cache',
+      createAcl: {
+        ownerUid: '1000',
+        ownerGid: '1000',
+        permissions: '755'
+      }
+    });
+
     // =================
     // CREATE APPLICATION LOAD BALANCER
     // =================
@@ -202,7 +217,8 @@ export class EtlUtilsStack extends cdk.Stack {
       ],
       resources: [
         `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${efsFileSystem.fileSystemId}`,
-        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`,
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${mapproxyCacheAccessPoint.accessPointId}`
       ]
     }));
 
@@ -249,6 +265,9 @@ export class EtlUtilsStack extends cdk.Stack {
       } else if (containerName === 'ais-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-AIS-Proxy-Api-Keys.json';
+      } else if (containerName === 'tileserver-gl') {
+        environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+        environmentVariables.CONFIG_KEY = 'ETL-Util-TileServer-GL-Api-Keys.json';
       }
 
       // Create container service
@@ -264,18 +283,47 @@ export class EtlUtilsStack extends cdk.Stack {
         containerImageUri,
         environmentVariables,
         stackNameComponent,
-        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : undefined,
+        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : 
+                       containerName === 'mapproxy' ? mapproxyCacheAccessPoint : undefined,
       });
 
       containerServices[containerName] = containerService;
 
-      // Add ALB listener rule
-      alb.addContainerRule(
-        containerName,
-        containerConfig.path,
-        containerService.targetGroup,
-        containerConfig.priority
-      );
+      // Add ALB listener rule based on routing type
+      if (containerConfig.hostname) {
+        // Hostname-based routing with CloudFront
+        alb.addHostnameRule(
+          containerName,
+          containerConfig.hostname,
+          containerService.targetGroup,
+          containerConfig.priority || 100
+        );
+        
+        // Create Route53 record for hostname (CloudFront disabled for now)
+        new route53.ARecord(this, `${containerName}ARecord`, {
+          zone: hostedZone,
+          recordName: containerConfig.hostname,
+          target: route53.RecordTarget.fromAlias(
+            new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+          ),
+        });
+
+        new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
+          zone: hostedZone,
+          recordName: containerConfig.hostname,
+          target: route53.RecordTarget.fromAlias(
+            new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+          ),
+        });
+      } else if (containerConfig.path) {
+        // Path-based routing
+        alb.addContainerRule(
+          containerName,
+          containerConfig.path,
+          containerService.targetGroup,
+          containerConfig.priority || 100
+        );
+      }
     });
 
     // =================
@@ -302,8 +350,17 @@ export class EtlUtilsStack extends cdk.Stack {
         return;
       }
 
+      let serviceUrl: string;
+      if (containerConfig.hostname) {
+        serviceUrl = `https://${containerConfig.hostname}.${hostedZone.zoneName}`;
+      } else if (containerConfig.path) {
+        serviceUrl = `https://${alb.utilsFqdn}${containerConfig.path}`;
+      } else {
+        return; // Skip if neither hostname nor path is defined
+      }
+
       new cdk.CfnOutput(this, `${containerName}Url`, {
-        value: `https://${alb.utilsFqdn}${containerConfig.path}`,
+        value: serviceUrl,
         description: `${containerName} service URL`,
         exportName: `${id}-${containerName}Url`,
       });

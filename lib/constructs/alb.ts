@@ -9,6 +9,7 @@ import {
   aws_route53 as route53,
   aws_route53_targets as targets,
   aws_s3 as s3,
+  aws_cloudfront as cloudfront,
   Duration,
   Fn
 } from 'aws-cdk-lib';
@@ -79,10 +80,18 @@ export class Alb extends Construct {
    */
   public readonly utilsFqdn: string;
 
+  /**
+   * Route53 hosted zone
+   */
+  private readonly hostedZone: route53.IHostedZone;
+
   constructor(scope: Construct, id: string, props: AlbProps) {
     super(scope, id);
 
     const { contextConfig, vpc, certificate, hostedZone, albSecurityGroup } = props;
+
+    // Store hostedZone reference
+    this.hostedZone = hostedZone;
 
     // Create the utils FQDN using imported hosted zone name
     this.utilsFqdn = `${contextConfig.utilsHostname}.${hostedZone.zoneName}`;
@@ -183,4 +192,26 @@ export class Alb extends Construct {
       action: elbv2.ListenerAction.forward([targetGroup]),
     });
   }
+
+  /**
+   * Add a hostname-based listener rule for a container service
+   */
+  public addHostnameRule(
+    id: string,
+    hostname: string,
+    targetGroup: elbv2.ApplicationTargetGroup,
+    priority: number
+  ): elbv2.ApplicationListenerRule {
+    const fqdn = `${hostname}.${this.hostedZone.zoneName}`;
+    return new elbv2.ApplicationListenerRule(this, `${id}Rule`, {
+      listener: this.httpsListener,
+      priority,
+      conditions: [
+        elbv2.ListenerCondition.hostHeaders([fqdn]),
+      ],
+      action: elbv2.ListenerAction.forward([targetGroup]),
+    });
+  }
+
+
 }

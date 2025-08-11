@@ -1,0 +1,47 @@
+{
+  "options": {
+    "cache": {
+      "maxAge": 2592000,
+      "cacheControl": "public, max-age=2592000, immutable"
+    },
+    "headers": {
+      "Cache-Control": "public, max-age=2592000, immutable",
+      "Vary": "Accept-Encoding"
+    }
+  },
+  "styles": {
+    "topolite": {
+      "name": "NZ Topo Lite",
+      "style": "topolite-style.json",
+      "serve_rendered": true,
+      "center": [174.7772, -41.2924],
+      "zoom": 12,
+      "bounds": [166.0, -48.0, 179.0, -34.0],
+      "tilejson": {
+        "format": "png"
+      }
+    },
+    "topographic": {
+      "name": "NZ Topographic",
+      "style": "topographic-style.json",
+      "serve_rendered": true,
+      "center": [174.7772, -41.2924],
+      "zoom": 12,
+      "bounds": [166.0, -48.0, 179.0, -34.0],
+      "tilejson": {
+        "format": "png"
+      }
+    },
+    "nationalmap": {
+      "name": "NZ Emergency Management",
+      "style": "nationalmap-style.json",
+      "serve_rendered": true,
+      "center": [174.7772, -41.2924],
+      "zoom": 12,
+      "bounds": [166.0, -48.0, 179.0, -34.0],
+      "tilejson": {
+        "format": "png"
+      }
+    }
+  }
+}
