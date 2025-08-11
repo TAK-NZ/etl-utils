@@ -1,6 +1,7 @@
 {
   "version": 8,
-  "name": "National Map Emergency Management",
+  "name": "NZ Emergency Management",
+  "attribution": "© <a href='http://creativecommons.org/licenses/by-nc-nd/4.0/'>NationalMap WMS Basemap Service CC BY-NC-ND 4.0</a>",
   "sources": {
     "wms-source": {
       "type": "raster",

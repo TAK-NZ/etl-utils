@@ -1,7 +1,8 @@
 {
   "id": "st_topographic",
   "version": 8,
-  "name": "NZ Topographic",
+  "name": "LINZ Topographic",
+  "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>",
   "metadata": {
     "maputnik:renderer": "mbgljs",
     "defaultZoom": 6

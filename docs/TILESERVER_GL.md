@@ -25,6 +25,11 @@ https://utils.{domain}/tiles
 - **URL**: `/tiles/styles/nationalmap/style.json`
 - **Tiles**: `/tiles/styles/nationalmap/{z}/{x}/{y}.png`
 
+### LINZ Topographic Raster
+- **Style ID**: `linz-topo`
+- **URL**: `/tiles/styles/linz-topo/style.json`
+- **Tiles**: `/tiles/styles/linz-topo/{z}/{x}/{y}.png`
+
 ## Health Check
 
 ```
