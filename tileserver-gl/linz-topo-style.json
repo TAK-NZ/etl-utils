@@ -1,0 +1,22 @@
+{
+  "version": 8,
+  "name": "LINZ Topographic Raster",
+  "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>",
+  "sources": {
+    "linz-topo": {
+      "type": "raster",
+      "tiles": ["https://basemaps.linz.govt.nz/v1/tiles/topo-raster/WebMercatorQuad/{z}/{x}/{y}.webp?api=PLACEHOLDER_API_KEY"],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 18,
+      "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>"
+    }
+  },
+  "layers": [
+    {
+      "id": "linz-topo",
+      "type": "raster",
+      "source": "linz-topo"
+    }
+  ]
+}
