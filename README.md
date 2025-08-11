@@ -30,6 +30,13 @@ AISHub-compatible proxy service providing access to real-time AIS vessel data fr
 - **Health Check**: `/ais-proxy/health`
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
+### tileserver-gl
+MapTiler TileServer GL providing vector and raster tile services for New Zealand topographic maps.
+
+- **Path**: `/tiles/*`
+- **Health Check**: `/tiles/health`
+- **Documentation**: [TileServer GL API](docs/TILESERVER_GL.md)
+
 
 
 ## Configuration
@@ -53,6 +60,12 @@ Environment-specific configuration is managed in `cdk.json`:
         "path": "/ais-proxy",
         "port": 3000,
         "priority": 2
+      },
+      "tileserver-gl": {
+        "enabled": true,
+        "path": "/tiles",
+        "port": 8080,
+        "priority": 3
       }
     }
   }
@@ -85,7 +98,7 @@ npm run deploy
 cdk deploy --context envType=prod
 
 # Deploy with pre-built images
-cdk deploy --context envType=prod --context usePreBuiltImages=true --context weather-proxyImageTag=v1.0.0
+cdk deploy --context envType=prod --context usePreBuiltImages=true --context weather-proxyImageTag=v1.0.0 --context tileserverGlImageTag=v1.0.0
 ```
 
 ## Adding New Services
