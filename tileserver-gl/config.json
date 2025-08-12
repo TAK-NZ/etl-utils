@@ -14,7 +14,7 @@
       "name": "LINZ Topolite",
       "style": "topolite-style.json",
       "serve_rendered": true,
-      "center": [174.7772, -41.2924],
+      "center": [174.7763921, -41.2865302],
       "zoom": 12,
       "bounds": [166.0, -48.0, 179.0, -34.0],
       "tilejson": {
@@ -25,7 +25,7 @@
       "name": "LINZ Topographic",
       "style": "topographic-style.json",
       "serve_rendered": true,
-      "center": [174.7772, -41.2924],
+      "center": [174.7763921, -41.2865302],
       "zoom": 12,
       "bounds": [166.0, -48.0, 179.0, -34.0],
       "tilejson": {
@@ -36,7 +36,7 @@
       "name": "LINZ Topographic Raster",
       "style": "linz-topo-style.json",
       "serve_rendered": true,
-      "center": [174.7772, -41.2924],
+      "center": [174.7763921, -41.2865302],
       "zoom": 12,
       "bounds": [166.0, -48.0, 179.0, -34.0],
       "tilejson": {
@@ -47,7 +47,7 @@
       "name": "NZ Emergency Management",
       "style": "nationalmap-style.json",
       "serve_rendered": true,
-      "center": [174.7772, -41.2924],
+      "center": [174.7763921, -41.2865302],
       "zoom": 12,
       "bounds": [166.0, -48.0, 179.0, -34.0],
       "tilejson": {
