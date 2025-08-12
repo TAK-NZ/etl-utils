@@ -5,7 +5,7 @@
   "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>",
   "metadata": {
     "maputnik:renderer": "mbgljs",
-    "defaultZoom": 6
+    "defaultZoom": 12
   },
   "sprite": "https://basemaps.linz.govt.nz/v1/sprites/topographic",
   "glyphs": "https://basemaps.linz.govt.nz/v1/fonts/{fontstack}/{range}.pbf",
