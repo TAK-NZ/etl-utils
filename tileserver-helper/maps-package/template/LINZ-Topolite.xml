@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <customMapSource>
-    <name>2 - TAK.NZ - LINZ Topolite</name>
+    <name>02 - TAK.NZ - LINZ Topolite</name>
     <minZoom>0</minZoom>
     <maxZoom>20</maxZoom>
     <tileType>png</tileType>

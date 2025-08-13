@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <customMapSource>
-  <name>9 - Google Maps - Traffic</name>
+  <name>09 - Google Maps - Traffic</name>
   <minZoom>0</minZoom>
   <maxZoom>18</maxZoom>
   <tileType>png</tileType>

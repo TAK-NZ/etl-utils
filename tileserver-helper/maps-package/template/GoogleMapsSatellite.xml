@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <customMapSource>
-  <name>7 - Google Maps - Satellite</name>
+  <name>07 - Google Maps - Satellite</name>
   <minZoom>0</minZoom>
   <maxZoom>18</maxZoom>
   <tileType>png</tileType>
