@@ -45,4 +45,5 @@ export DISPLAY=:99
 sleep 2
 
 # Start tileserver-gl with memory limit
+echo "Starting TileServer GL..."
 exec node --max-old-space-size=3072 /usr/src/app/src/main.js --config /data/config.json --port 8080

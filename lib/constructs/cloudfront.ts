@@ -8,6 +8,8 @@ import {
   aws_certificatemanager as acm,
   aws_route53 as route53,
   aws_route53_targets as targets,
+  aws_lambda as lambda,
+  aws_iam as iam,
   Duration,
 } from 'aws-cdk-lib';
 
@@ -43,6 +45,11 @@ export interface CloudFrontProps {
     metadata?: string;
     health?: string;
   };
+
+  /**
+   * API keys for authentication
+   */
+  apiKeys: string[];
 }
 
 /**
@@ -62,7 +69,7 @@ export class CloudFront extends Construct {
   constructor(scope: Construct, id: string, props: CloudFrontProps) {
     super(scope, id);
 
-    const { albDomainName, certificate, hostedZone, hostname, cacheTtl } = props;
+    const { albDomainName, certificate, hostedZone, hostname, cacheTtl, apiKeys } = props;
 
     // Create origin for ALB
     const albOrigin = new origins.HttpOrigin(albDomainName, {
@@ -127,6 +134,56 @@ export class CloudFront extends Construct {
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
     });
 
+    // Create CloudFront Function for API key validation (styles only)
+    const apiKeyFunction = new cloudfront.Function(this, 'ApiKeyFunction', {
+      functionName: `tileserver-api-auth-${Date.now()}`,
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+    var request = event.request;
+    
+    // Only validate /styles/* paths - allow everything else
+    if (!request.uri.startsWith('/styles/')) {
+        return request;
+    }
+    
+    // Exclude specific files from authentication
+    var excludedFiles = [
+        '/styles/topolite/12/4036/2564.png',
+        '/styles/linz-topo/12/4036/2564.png',
+        '/styles/topographic/12/4036/2564.png',
+        '/styles/nationalmap/12/4036/2564.png'
+    ];
+    
+    if (excludedFiles.indexOf(request.uri) !== -1) {
+        return request;
+    }
+    
+    // Check for API key in query string
+    var querystring = request.querystring;
+    if (!querystring.api || !querystring.api.value) {
+        return {
+            statusCode: 401,
+            statusDescription: 'Unauthorized',
+            body: 'API key required for styles access'
+        };
+    }
+    
+    var providedKey = querystring.api.value;
+    var validKeys = ${JSON.stringify(apiKeys)};
+    
+    if (validKeys.indexOf(providedKey) === -1) {
+        return {
+            statusCode: 403,
+            statusDescription: 'Forbidden',
+            body: 'Invalid API key'
+        };
+    }
+    
+    return request;
+}
+      `),
+    });
+
     // Create distribution
     this.distribution = new cloudfront.Distribution(this, 'Distribution', {
       domainNames: [`${hostname}.${hostedZone.zoneName}`],
@@ -146,6 +203,10 @@ export class CloudFront extends Construct {
           originRequestPolicy,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+          functionAssociations: [{
+            function: apiKeyFunction,
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+          }],
         },
         // Health endpoint - no cache
         '/health': {

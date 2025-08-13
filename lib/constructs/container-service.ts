@@ -210,7 +210,6 @@ export class ContainerService extends Construct {
 
     // Create target group
     this.targetGroup = new elbv2.ApplicationTargetGroup(this, 'TargetGroup', {
-      targetGroupName: `TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       vpc: ecsCluster.vpc,
       targetType: elbv2.TargetType.IP,
       port: containerConfig.port,

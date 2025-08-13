@@ -59,7 +59,7 @@
           "port": 8080,
           "cpu": 2048,
           "memory": 4096,
-          "priority": 3,
+          "priority": 10,
           "imageTag": "v1.0.0"
         }
       },
@@ -120,7 +120,7 @@
           "port": 8080,
           "cpu": 2048,
           "memory": 4096,
-          "priority": 3,
+          "priority": 20,
           "imageTag": "v1.0.0"
         }
       },

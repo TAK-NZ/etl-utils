@@ -74,3 +74,6 @@ jspm_packages/
 # OS
 .DS_Store
 Thumbs.db
+
+# Generated TAK maps package
+TAK-NZ-Maps-Package.zip
