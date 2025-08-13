@@ -34,6 +34,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
     });
 
     const template = Template.fromStack(stack);
@@ -70,6 +71,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
       cacheTtl: {
         tiles: '7d',
         metadata: '30m',
@@ -116,6 +118,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
     });
 
     const template = Template.fromStack(stack);
@@ -146,6 +149,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
       cacheTtl: {
         tiles: '1d',
         metadata: '2h',
@@ -186,6 +190,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
       cacheTtl: {
         tiles: 'invalid',
         metadata: '2x',
@@ -217,6 +222,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'maps',
+      apiKeys: ['test-key-1', 'test-key-2'],
     });
 
     const template = Template.fromStack(stack);
@@ -259,6 +265,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
     });
 
     expect(cloudfront.distribution).toBeDefined();
@@ -271,6 +278,7 @@ describe('CloudFront', () => {
       certificate: mockCertificate,
       hostedZone: mockHostedZone,
       hostname: 'tiles',
+      apiKeys: ['test-key-1', 'test-key-2'],
     });
 
     const template = Template.fromStack(stack);

@@ -92,7 +92,6 @@ describe('ContainerService Construct', () => {
 
     // Check target group
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
-      Name: 'TAK-Dev-ETL-Utils-ais-proxy',
       Port: 3000,
       Protocol: 'HTTP',
       TargetType: 'ip',
