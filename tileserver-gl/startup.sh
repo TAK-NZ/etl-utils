@@ -34,7 +34,27 @@ if [ -n "$CONFIG_BUCKET" ] && [ -n "$CONFIG_KEY" ]; then
         echo "Failed to download config from S3, using default configuration"
     fi
 else
-    echo "CONFIG_BUCKET or CONFIG_KEY not set, using default configuration"
+    echo "CONFIG_BUCKET or CONFIG_KEY not set, checking environment variables"
+    
+    # Check for environment variables
+    if [ -n "$LINZ_API_KEY" ] && [ -n "$NATIONALMAP_AUTH_KEY" ]; then
+        echo "Using API keys from environment variables"
+        echo "Updating style files with environment API keys"
+        
+        # Update all style files with the API keys
+        for style_file in /data/*-style.json; do
+            if [ -f "$style_file" ]; then
+                sed -i "s/PLACEHOLDER_API_KEY/$LINZ_API_KEY/g" "$style_file"
+                sed -i "s/PLACEHOLDER_AUTH_KEY/$NATIONALMAP_AUTH_KEY/g" "$style_file"
+                echo "Updated $style_file with environment API keys"
+            fi
+        done
+    else
+        echo "Warning: No API keys found in S3 or environment variables"
+        echo "LINZ_API_KEY: ${LINZ_API_KEY:-(not set)}"
+        echo "NATIONALMAP_AUTH_KEY: ${NATIONALMAP_AUTH_KEY:-(not set)}"
+        echo "Tileserver will run with placeholder keys - external sources will fail"
+    fi
 fi
 
 # Start virtual display for headless operation
