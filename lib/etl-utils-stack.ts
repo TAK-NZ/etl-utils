@@ -5,13 +5,16 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
+import * as route53_targets from 'aws-cdk-lib/aws-route53-targets';
+import * as targets from 'aws-cdk-lib/aws-route53-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as efs from 'aws-cdk-lib/aws-efs';
-
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
 import { Alb } from './constructs/alb';
 import { ContainerService } from './constructs/container-service';
+import { CloudFront } from './constructs/cloudfront';
+import { ApiAuth } from './constructs/api-auth';
 
 // Utility imports
 import { ContextEnvironmentConfig } from './stack-config';
@@ -131,6 +134,15 @@ export class EtlUtilsStack extends cdk.Stack {
     });
 
     // =================
+    // CREATE API AUTHENTICATION
+    // =================
+
+    const apiAuth = new ApiAuth(this, 'ApiAuth', {
+      environment,
+      contextConfig: envConfig,
+    });
+
+    // =================
     // CREATE APPLICATION LOAD BALANCER
     // =================
 
@@ -189,6 +201,8 @@ export class EtlUtilsStack extends cdk.Stack {
       actions: ['kms:Decrypt'],
       resources: [kmsKeyArn],
     }));
+
+    // S3 permissions already granted above for config bucket access
 
     // Add EFS permissions for task role (needed for ais-proxy)
     taskRole.addToPolicy(new iam.PolicyStatement({
@@ -249,6 +263,10 @@ export class EtlUtilsStack extends cdk.Stack {
       } else if (containerName === 'ais-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-AIS-Proxy-Api-Keys.json';
+      } else if (containerName === 'tileserver-gl') {
+        environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+        environmentVariables.CONFIG_KEY = 'ETL-Util-TileServer-GL-Api-Keys.json';
+        // API keys loaded from S3 config file
       }
 
       // Create container service
@@ -269,13 +287,94 @@ export class EtlUtilsStack extends cdk.Stack {
 
       containerServices[containerName] = containerService;
 
-      // Add ALB listener rule
-      alb.addContainerRule(
-        containerName,
-        containerConfig.path,
-        containerService.targetGroup,
-        containerConfig.priority
-      );
+      // Add ALB listener rule based on routing type
+      if (containerConfig.hostname) {
+        // Hostname-based routing with CloudFront
+        alb.addHostnameRule(
+          containerName,
+          containerConfig.hostname,
+          containerService.targetGroup,
+          containerConfig.priority || 100
+        );
+        
+        // Create CloudFront distribution for tileserver if enabled
+        if (containerName === 'tileserver-gl' && envConfig.cloudfront?.tileserver?.enabled) {
+          // Create us-east-1 certificate for CloudFront
+          const cloudFrontCertificate = new acm.DnsValidatedCertificate(this, 'CloudFrontCertificate', {
+            domainName: `${containerConfig.hostname}.${hostedZone.zoneName}`,
+            hostedZone,
+            region: 'us-east-1',
+          });
+
+          // Get API keys from CDK context
+          const apiKeys = this.node.tryGetContext('apiKeys') || [
+            'tk_a8b9c2d3e4f5g6h7i8j9k0l1m2n3o4p5',
+            'tk_x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6',
+            'tk_q7w8e9r0t1y2u3i4o5p6a7s8d9f0g1h2',
+            'tk_m3n4b5v6c7x8z9a0s1d2f3g4h5j6k7l8',
+            'tk_p9o8i7u6y5t4r3e2w1q0a9s8d7f6g5h4'
+          ];
+
+          // Create CloudFront distribution
+          const cloudFront = new CloudFront(this, 'TileServerCloudFront', {
+            albDomainName: alb.dnsName,
+            certificate: cloudFrontCertificate,
+            hostedZone,
+            hostname: containerConfig.hostname,
+            cacheTtl: envConfig.cloudfront.tileserver.cacheTtl,
+            apiKeys,
+          });
+
+          // Create Route53 records pointing to CloudFront
+          new route53.ARecord(this, `${containerName}ARecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new targets.CloudFrontTarget(cloudFront.distribution)
+            ),
+          });
+
+          new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new targets.CloudFrontTarget(cloudFront.distribution)
+            ),
+          });
+
+          // Output CloudFront domain
+          new cdk.CfnOutput(this, 'CloudFrontDomain', {
+            value: cloudFront.domainName,
+            description: 'CloudFront distribution domain name',
+            exportName: `${id}-CloudFrontDomain`,
+          });
+        } else {
+          // Create Route53 record for hostname (direct ALB)
+          new route53.ARecord(this, `${containerName}ARecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+            ),
+          });
+
+          new route53.AaaaRecord(this, `${containerName}AaaaRecord`, {
+            zone: hostedZone,
+            recordName: containerConfig.hostname,
+            target: route53.RecordTarget.fromAlias(
+              new route53_targets.LoadBalancerTarget(alb.loadBalancer)
+            ),
+          });
+        }
+      } else if (containerConfig.path) {
+        // Path-based routing
+        alb.addContainerRule(
+          containerName,
+          containerConfig.path,
+          containerService.targetGroup,
+          containerConfig.priority || 100
+        );
+      }
     });
 
     // =================
@@ -302,8 +401,17 @@ export class EtlUtilsStack extends cdk.Stack {
         return;
       }
 
+      let serviceUrl: string;
+      if (containerConfig.hostname) {
+        serviceUrl = `https://${containerConfig.hostname}.${hostedZone.zoneName}`;
+      } else if (containerConfig.path) {
+        serviceUrl = `https://${alb.utilsFqdn}${containerConfig.path}`;
+      } else {
+        return; // Skip if neither hostname nor path is defined
+      }
+
       new cdk.CfnOutput(this, `${containerName}Url`, {
-        value: `https://${alb.utilsFqdn}${containerConfig.path}`,
+        value: serviceUrl,
         description: `${containerName} service URL`,
         exportName: `${id}-${containerName}Url`,
       });

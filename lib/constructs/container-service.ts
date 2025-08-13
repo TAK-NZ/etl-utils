@@ -135,8 +135,8 @@ export class ContainerService extends Construct {
       executionRole: taskExecutionRole,
     });
 
-    // Add EFS volume for ais-proxy if needed
-    if (containerName === 'ais-proxy' && efsAccessPoint) {
+    // Add EFS volume if needed
+    if (efsAccessPoint) {
       this.taskDefinition.addVolume({
         name: 'efs-volume',
         efsVolumeConfiguration: {
@@ -191,18 +191,25 @@ export class ContainerService extends Construct {
       },
     });
 
-    // Add EFS mount point for ais-proxy
-    if (containerName === 'ais-proxy' && efsAccessPoint) {
-      container.addMountPoints({
-        sourceVolume: 'efs-volume',
-        containerPath: '/data',
-        readOnly: false
-      });
+    // Add EFS mount points
+    if (efsAccessPoint) {
+      if (containerName === 'ais-proxy') {
+        container.addMountPoints({
+          sourceVolume: 'efs-volume',
+          containerPath: '/data',
+          readOnly: false
+        });
+      } else if (containerName === 'mapproxy') {
+        container.addMountPoints({
+          sourceVolume: 'efs-volume',
+          containerPath: '/cache',
+          readOnly: false
+        });
+      }
     }
 
     // Create target group
     this.targetGroup = new elbv2.ApplicationTargetGroup(this, 'TargetGroup', {
-      targetGroupName: `TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       vpc: ecsCluster.vpc,
       targetType: elbv2.TargetType.IP,
       port: containerConfig.port,
@@ -229,6 +236,7 @@ export class ContainerService extends Construct {
       assignPublicIp: false, // Deploy in private subnets
       enableExecuteCommand: contextConfig.ecs.enableEcsExec,
       healthCheckGracePeriod: Duration.seconds(120),
+
     });
 
     // Attach service to target group

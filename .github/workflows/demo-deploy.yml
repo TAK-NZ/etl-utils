@@ -83,6 +83,7 @@ jobs:
             --context usePreBuiltImages=true \
             --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
             --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context apiKeys='${{ secrets.TILESERVER_API_KEYS }}' \
             --require-approval never
 
       - name: Wait for Testing Period
@@ -124,4 +125,5 @@ jobs:
             --context usePreBuiltImages=true \
             --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
             --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context apiKeys='${{ secrets.TILESERVER_API_KEYS }}' \
             --require-approval never

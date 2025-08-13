@@ -65,4 +65,11 @@ jobs:
           fi
 
       - name: Deploy Production
-        run: npm run cdk deploy -- --context envType=prod --context stackName=${{ vars.PROD_STACK_NAME }} --context usePreBuiltImages=true --context takImageTag=${{ steps.images.outputs.tak-tag }} --require-approval never
+        run: |
+          npm run cdk deploy -- \
+            --context envType=prod \
+            --context stackName=${{ vars.PROD_STACK_NAME }} \
+            --context usePreBuiltImages=true \
+            --context takImageTag=${{ steps.images.outputs.tak-tag }} \
+            --context apiKeys='${{ secrets.TILESERVER_API_KEYS }}' \
+            --require-approval never
