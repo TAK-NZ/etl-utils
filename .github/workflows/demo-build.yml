@@ -6,6 +6,7 @@ on:
     paths:
       - 'weather-proxy/**'
       - 'ais-proxy/**'
+      - 'tileserver-gl/**'
       - 'cdk.json'
   workflow_call:
     inputs:
@@ -21,6 +22,9 @@ on:
       ais-proxy-tag:
         description: 'AIS proxy image tag'
         value: ${{ jobs.build-images.outputs.ais-proxy-tag }}
+      tileserver-gl-tag:
+        description: 'TileServer GL image tag'
+        value: ${{ jobs.build-images.outputs.tileserver-gl-tag }}
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -40,6 +44,7 @@ jobs:
     outputs:
       weather-proxy-tag: ${{ steps.tags.outputs.weather-proxy-tag }}
       ais-proxy-tag: ${{ steps.tags.outputs.ais-proxy-tag }}
+      tileserver-gl-tag: ${{ steps.tags.outputs.tileserver-gl-tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,30 +76,36 @@ jobs:
           
           WEATHER_VERSION=$(jq -r '.context."dev-test".containers."weather-proxy".imageTag' cdk.json)
           AIS_VERSION=$(jq -r '.context."dev-test".containers."ais-proxy".imageTag' cdk.json)
+          TILESERVER_VERSION=$(jq -r '.context."dev-test".containers."tileserver-gl".imageTag' cdk.json)
           
           if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
             WEATHER_TAG="weather-proxy-${TIMESTAMP}"
             AIS_TAG="ais-proxy-${TIMESTAMP}"
+            TILESERVER_TAG="tileserver-gl-${TIMESTAMP}"
           else
             WEATHER_TAG="weather-proxy-${WEATHER_VERSION}"
             AIS_TAG="ais-proxy-${AIS_VERSION}"
+            TILESERVER_TAG="tileserver-gl-${TILESERVER_VERSION}"
           fi
           
           echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
           echo "weather-proxy-tag=$WEATHER_TAG" >> $GITHUB_OUTPUT
           echo "ais-proxy-tag=$AIS_TAG" >> $GITHUB_OUTPUT
+          echo "tileserver-gl-tag=$TILESERVER_TAG" >> $GITHUB_OUTPUT
           echo "Using ECR repository: $ECR_REPO_URI"
-          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG"
+          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG, $TILESERVER_TAG"
       
       - name: Check Enabled Containers
         id: containers
         run: |
           WEATHER_ENABLED=$(jq -r '.context."dev-test".containers."weather-proxy".enabled' cdk.json)
           AIS_ENABLED=$(jq -r '.context."dev-test".containers."ais-proxy".enabled' cdk.json)
+          TILESERVER_ENABLED=$(jq -r '.context."dev-test".containers."tileserver-gl".enabled' cdk.json)
           
           echo "weather-enabled=$WEATHER_ENABLED" >> $GITHUB_OUTPUT
           echo "ais-enabled=$AIS_ENABLED" >> $GITHUB_OUTPUT
+          echo "tileserver-enabled=$TILESERVER_ENABLED" >> $GITHUB_OUTPUT
       
       - name: Login to Amazon ECR
         run: |
@@ -130,6 +141,18 @@ jobs:
             fi
           fi
           
+          # Build tileserver-gl if enabled
+          if [[ "${{ steps.containers.outputs.tileserver-enabled }}" == "true" ]]; then
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.tileserver-gl-tag }} >/dev/null 2>&1; then
+              echo "✅ TileServer GL image already exists, skipping build"
+            else
+              echo "🔨 Building tileserver-gl image"
+              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tileserver-gl-tag }} ./tileserver-gl
+              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tileserver-gl-tag }}
+              echo "✅ TileServer GL image pushed"
+            fi
+          fi
+          
 
       
       - name: Output Image Information
@@ -140,6 +163,9 @@ jobs:
           fi
           if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
             echo "📦 AIS Proxy: ${{ steps.tags.outputs.ais-proxy-tag }}"
+          fi
+          if [[ "${{ steps.containers.outputs.tileserver-enabled }}" == "true" ]]; then
+            echo "📦 TileServer GL: ${{ steps.tags.outputs.tileserver-gl-tag }}"
           fi
           echo ""
           echo "🚀 To deploy with these images, use:"
