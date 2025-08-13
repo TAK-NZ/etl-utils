@@ -123,16 +123,17 @@ jobs:
             
           done <<< "${{ steps.containers.outputs.enabled-containers }}"
           
-          # Output JSON for deploy workflows
-          echo "image-tags-json=$IMAGE_TAGS_JSON" >> $GITHUB_OUTPUT
-          echo "Built image tags: $IMAGE_TAGS_JSON"
+          # Output JSON for deploy workflows (compact format for GitHub Actions)
+          COMPACT_JSON=$(echo $IMAGE_TAGS_JSON | jq -c .)
+          echo "image-tags-json=$COMPACT_JSON" >> $GITHUB_OUTPUT
+          echo "Built image tags: $COMPACT_JSON"
           
 
       
       - name: Output Image Information
         run: |
           echo "✅ Successfully built and pushed Docker images:"
-          echo "${{ steps.build.outputs.image-tags-json }}" | jq -r 'to_entries[] | "📦 \(.key): \(.value)"'
+          echo '${{ steps.build.outputs.image-tags-json }}' | jq -r 'to_entries[] | "📦 \(.key): \(.value)"'
           echo ""
           echo "🚀 To deploy with these images, use:"
           echo "npm run cdk deploy -- --context usePreBuiltImages=true --context imageTagsJson='${{ steps.build.outputs.image-tags-json }}'"
