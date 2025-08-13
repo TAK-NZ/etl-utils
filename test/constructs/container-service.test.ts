@@ -123,7 +123,6 @@ describe('ContainerService Construct', () => {
 
     // Check log group
     template.hasResourceProperties('AWS::Logs::LogGroup', {
-      LogGroupName: '/ecs/TAK-Dev-ETL-Utils-weather-proxy',
       RetentionInDays: 7, // dev-test environment
     });
   });

@@ -105,8 +105,11 @@ cdk deploy --context envType=prod
 # Deploy with custom API keys
 cdk deploy --context envType=dev-test --context apiKeys='["key1","key2"]'
 
-# Deploy with pre-built images
-cdk deploy --context envType=prod --context usePreBuiltImages=true --context weather-proxyImageTag=v1.0.0 --context tileserverGlImageTag=v1.0.0
+# Deploy with pre-built images (new JSON format - recommended)
+cdk deploy --context envType=prod --context usePreBuiltImages=true --context imageTagsJson='{"weather-proxy":"v1.0.0","ais-proxy":"v1.0.0","tileserver-gl":"v1.0.0"}'
+
+# Deploy with pre-built images (legacy individual parameters - still supported)
+cdk deploy --context envType=prod --context usePreBuiltImages=true --context weatherProxyImageTag=v1.0.0 --context aisProxyImageTag=v1.0.0 --context tileserverGlImageTag=v1.0.0
 ```
 
 ## Adding New Services
@@ -115,6 +118,8 @@ cdk deploy --context envType=prod --context usePreBuiltImages=true --context wea
 2. Add Dockerfile and application code
 3. Update `cdk.json` to include the new container configuration
 4. Deploy the stack
+
+**Note**: CI/CD workflows automatically discover and build new containers from `cdk.json` - no manual workflow updates required!
 
 Example container configuration:
 ```json
@@ -202,10 +207,10 @@ npm run test:coverage
 # Test API key authentication
 ./tileserver-helper/test-api-auth.sh
 
-# Test with custom API keys
-cdk deploy --context apiKeys='["test-key"]'
+# Test with custom API keys and image tags
+cdk deploy --context apiKeys='["test-key"]' --context imageTagsJson='{"weather-proxy":"test-v1.0.0"}'
 
-# GitHub Actions deployment uses TILESERVER_API_KEYS secret automatically
+# GitHub Actions deployment uses TILESERVER_API_KEYS secret and imageTagsJson automatically
 ```
 
 ## Development
