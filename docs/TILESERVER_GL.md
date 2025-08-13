@@ -1,77 +1,120 @@
 # TileServer GL API
 
-MapTiler TileServer GL service providing vector and raster tile services for New Zealand topographic maps.
+MapTiler TileServer GL service providing vector and raster tile services for New Zealand topographic maps with API key authentication.
 
 ## Base URL
 
 ```
-https://utils.{domain}/tiles
+https://tiles.{domain}
+```
+
+## Authentication
+
+All endpoints except `/health` require an API key parameter:
+
+```
+?api=your-api-key-here
 ```
 
 ## Available Styles
 
 ### NZ Topo Lite
 - **Style ID**: `topolite`
-- **URL**: `/tiles/styles/topolite/style.json`
-- **Tiles**: `/tiles/styles/topolite/{z}/{x}/{y}.png`
+- **URL**: `/styles/topolite/style.json?api=your-key`
+- **Tiles**: `/styles/topolite/{z}/{x}/{y}.png?api=your-key`
 
 ### NZ Topographic  
 - **Style ID**: `topographic`
-- **URL**: `/tiles/styles/topographic/style.json`
-- **Tiles**: `/tiles/styles/topographic/{z}/{x}/{y}.png`
+- **URL**: `/styles/topographic/style.json?api=your-key`
+- **Tiles**: `/styles/topographic/{z}/{x}/{y}.png?api=your-key`
 
 ### NZ Emergency Management
 - **Style ID**: `nationalmap`
-- **URL**: `/tiles/styles/nationalmap/style.json`
-- **Tiles**: `/tiles/styles/nationalmap/{z}/{x}/{y}.png`
+- **URL**: `/styles/nationalmap/style.json?api=your-key`
+- **Tiles**: `/styles/nationalmap/{z}/{x}/{y}.png?api=your-key`
 
 ### LINZ Topographic Raster
 - **Style ID**: `linz-topo`
-- **URL**: `/tiles/styles/linz-topo/style.json`
-- **Tiles**: `/tiles/styles/linz-topo/{z}/{x}/{y}.png`
+- **URL**: `/styles/linz-topo/style.json?api=your-key`
+- **Tiles**: `/styles/linz-topo/{z}/{x}/{y}.png?api=your-key`
 
 ## Health Check
 
 ```
-GET /tiles/health
+GET /health
 ```
 
-Returns service health status.
+Returns service health status. **No API key required.**
 
 ## Configuration
 
-The service uses LINZ Basemaps API for tile data. API keys are configured via S3:
+The service uses LINZ Basemaps API for tile data and requires API key authentication.
 
-### S3 Configuration File Format
+### API Key Authentication
+
+**CloudFront Function**: Validates API keys at the edge for `/styles/*` paths only
+
+**Excluded Files** (no authentication required):
+- `/styles/topolite/12/4036/2564.png`
+- `/styles/linz-topo/12/4036/2564.png` 
+- `/styles/topographic/12/4036/2564.png`
+- `/styles/nationalmap/12/4036/2564.png`
+
+**Configuration**: API keys managed via CDK context or defaults
+
+### Backend API Configuration (S3)
 
 ```json
 {
-  "authkey": "your-linz-auth-key",
+  "authkey": "your-nz-emergency-management-auth-key",
   "apikey": "your-linz-api-key"
 }
 ```
 
-### S3 Configuration Path
+**Path**: `ETL-Util-TileServer-GL-Api-Keys.json`
 
-- **Bucket**: Environment config bucket from base infrastructure
-- **Key**: `ETL-Util-TileServer-GL-Api-Keys.json`
+- `authkey`: NZ Emergency Management API credentials
+- `apikey`: LINZ Basemaps API credentials
 
 ## Usage Examples
 
-### Get Style JSON
+### Get Style JSON (requires API key)
 ```bash
-curl https://utils.example.com/tiles/styles/topolite/style.json
+curl "https://tiles.example.com/styles/topolite/style.json?api=your-api-key"
 ```
 
-### Get Tile
+### Get Tile (requires API key)
 ```bash
-curl https://utils.example.com/tiles/styles/topolite/6/63/39.png
+curl "https://tiles.example.com/styles/topolite/6/63/39.png?api=your-api-key"
+```
+
+### Get Excluded Tile (no API key required)
+```bash
+curl "https://tiles.example.com/styles/topolite/12/4036/2564.png"
 ```
 
 ### Health Check
 ```bash
-curl https://utils.example.com/tiles/health
+curl https://tiles.example.com/health
 ```
+
+## Error Responses
+
+### Missing API Key
+```json
+{
+  "error": "API key required"
+}
+```
+**Status**: 401 Unauthorized
+
+### Invalid API Key
+```json
+{
+  "error": "Invalid API key"
+}
+```
+**Status**: 403 Forbidden
 
 ## Map Bounds
 

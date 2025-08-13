@@ -31,12 +31,14 @@ AISHub-compatible proxy service providing access to real-time AIS vessel data fr
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
 ### tileserver-gl
-MapTiler TileServer GL providing vector and raster tile services for New Zealand topographic maps.
+MapTiler TileServer GL providing vector and raster tile services for New Zealand topographic maps with API key authentication.
 
 - **Hostname**: `tiles.{domain}`
 - **Health Check**: `/health`
+- **Authentication**: API key required for `/styles/*` paths via `?api=your-key` parameter
 - **Documentation**: [TileServer GL API](docs/TILESERVER_GL.md)
-- **CloudFront CDN**: [CloudFront Setup](docs/CLOUDFRONT.md) ✨ **NEW**
+- **CloudFront CDN**: [CloudFront Setup](docs/CLOUDFRONT.md) with edge authentication
+- **API Keys**: Managed via CDK context or fallback defaults
 
 
 
@@ -86,6 +88,7 @@ Following the TAK-NZ pattern, this stack supports both local Docker builds and p
 1. Base infrastructure must be deployed (`base-infra` stack)
 2. Node.js and AWS CDK installed
 3. AWS credentials configured
+4. API keys configured via CDK context (see [API Keys Setup](#api-keys-setup))
 
 ## Deployment
 
@@ -98,6 +101,9 @@ npm run deploy
 
 # Deploy to production
 cdk deploy --context envType=prod
+
+# Deploy with custom API keys
+cdk deploy --context envType=dev-test --context apiKeys='["key1","key2"]'
 
 # Deploy with pre-built images
 cdk deploy --context envType=prod --context usePreBuiltImages=true --context weather-proxyImageTag=v1.0.0 --context tileserverGlImageTag=v1.0.0
@@ -156,6 +162,34 @@ Production environment includes auto scaling based on:
 - **Memory Utilization** - Target 80%
 - **Scale Range** - 1-5 tasks per service
 
+## API Keys Setup
+
+### Option 1: CDK Context (Recommended)
+```bash
+# Deploy with custom API keys
+cdk deploy --context apiKeys='["your-key-1","your-key-2"]'
+```
+
+### Option 2: GitHub Actions (CI/CD)
+Set `TILESERVER_API_KEYS` secret in GitHub repository settings:
+```json
+["your-key-1","your-key-2"]
+```
+
+### Option 3: Default Keys
+If no context is provided, uses these default keys:
+- `tk_a8b9c2d3e4f5g6h7i8j9k0l1m2n3o4p5`
+- `tk_x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6`
+- `tk_q7w8e9r0t1y2u3i4o5p6a7s8d9f0g1h2`
+- `tk_m3n4b5v6c7x8z9a0s1d2f3g4h5j6k7l8`
+- `tk_p9o8i7u6y5t4r3e2w1q0a9s8d7f6g5h4`
+
+### Test API Authentication
+```bash
+# Edit test script with your domain and API key
+./tileserver-helper/test-api-auth.sh
+```
+
 ## Testing
 
 ```bash
@@ -164,6 +198,14 @@ npm test
 
 # Run tests with coverage
 npm run test:coverage
+
+# Test API key authentication
+./tileserver-helper/test-api-auth.sh
+
+# Test with custom API keys
+cdk deploy --context apiKeys='["test-key"]'
+
+# GitHub Actions deployment uses TILESERVER_API_KEYS secret automatically
 ```
 
 ## Development
