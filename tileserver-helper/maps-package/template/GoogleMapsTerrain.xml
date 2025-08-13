@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <customMapSource>
-  <name>8 - Google Maps - Terrain</name>
+  <name>08 - Google Maps - Terrain</name>
   <minZoom>0</minZoom>
   <maxZoom>18</maxZoom>
   <tileType>png</tileType>

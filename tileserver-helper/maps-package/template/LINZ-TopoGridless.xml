@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <customMapSource>
-    <name>3 - TAK.NZ - LINZ Topo Gridless</name>
+    <name>03 - TAK.NZ - LINZ Topo Gridless</name>
     <minZoom>0</minZoom>
     <maxZoom>14</maxZoom>
     <tileType>png</tileType>
