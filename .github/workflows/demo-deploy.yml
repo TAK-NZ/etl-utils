@@ -83,6 +83,7 @@ jobs:
             --context usePreBuiltImages=true \
             --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
             --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context tileserverGlImageTag=${{ needs.build-images.outputs.tileserver-gl-tag }} \
             --context apiKeys='${{ secrets.TILESERVER_API_KEYS }}' \
             --require-approval never
 
@@ -125,5 +126,6 @@ jobs:
             --context usePreBuiltImages=true \
             --context weatherProxyImageTag=${{ needs.build-images.outputs.weather-proxy-tag }} \
             --context aisProxyImageTag=${{ needs.build-images.outputs.ais-proxy-tag }} \
+            --context tileserverGlImageTag=${{ needs.build-images.outputs.tileserver-gl-tag }} \
             --context apiKeys='${{ secrets.TILESERVER_API_KEYS }}' \
             --require-approval never
