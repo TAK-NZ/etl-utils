@@ -7,6 +7,7 @@ on:
       - 'weather-proxy/**'
       - 'ais-proxy/**'
       - 'tileserver-gl/**'
+      - '**/Dockerfile'
       - 'cdk.json'
   workflow_call:
     inputs:
@@ -16,15 +17,9 @@ on:
         default: false
         type: boolean
     outputs:
-      weather-proxy-tag:
-        description: 'Weather proxy image tag'
-        value: ${{ jobs.build-images.outputs.weather-proxy-tag }}
-      ais-proxy-tag:
-        description: 'AIS proxy image tag'
-        value: ${{ jobs.build-images.outputs.ais-proxy-tag }}
-      tileserver-gl-tag:
-        description: 'TileServer GL image tag'
-        value: ${{ jobs.build-images.outputs.tileserver-gl-tag }}
+      image-tags-json:
+        description: 'All container image tags as JSON'
+        value: ${{ jobs.build-images.outputs.image-tags-json }}
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -42,9 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: demo
     outputs:
-      weather-proxy-tag: ${{ steps.tags.outputs.weather-proxy-tag }}
-      ais-proxy-tag: ${{ steps.tags.outputs.ais-proxy-tag }}
-      tileserver-gl-tag: ${{ steps.tags.outputs.tileserver-gl-tag }}
+      image-tags-json: ${{ steps.build.outputs.image-tags-json }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,8 +49,8 @@ jobs:
           aws-region: ${{ secrets.DEMO_AWS_REGION }}
           role-session-name: GitHubActions-DockerBuild
       
-      - name: Get ECR Repository and Build Tags
-        id: tags
+      - name: Get ECR Repository
+        id: ecr
         run: |
           # Get ECR repository ARN from BaseInfra exports
           ECR_REPO_ARN=$(aws cloudformation describe-stacks \
@@ -74,99 +67,77 @@ jobs:
           ECR_REPO_NAME=$(echo $ECR_REPO_ARN | cut -d'/' -f2)
           ECR_REPO_URI="${{ secrets.DEMO_AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.DEMO_AWS_REGION }}.amazonaws.com/${ECR_REPO_NAME}"
           
-          WEATHER_VERSION=$(jq -r '.context."dev-test".containers."weather-proxy".imageTag' cdk.json)
-          AIS_VERSION=$(jq -r '.context."dev-test".containers."ais-proxy".imageTag' cdk.json)
-          TILESERVER_VERSION=$(jq -r '.context."dev-test".containers."tileserver-gl".imageTag' cdk.json)
-          
-          if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
-            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            WEATHER_TAG="weather-proxy-${TIMESTAMP}"
-            AIS_TAG="ais-proxy-${TIMESTAMP}"
-            TILESERVER_TAG="tileserver-gl-${TIMESTAMP}"
-          else
-            WEATHER_TAG="weather-proxy-${WEATHER_VERSION}"
-            AIS_TAG="ais-proxy-${AIS_VERSION}"
-            TILESERVER_TAG="tileserver-gl-${TILESERVER_VERSION}"
-          fi
-          
           echo "ecr-repo-uri=$ECR_REPO_URI" >> $GITHUB_OUTPUT
-          echo "weather-proxy-tag=$WEATHER_TAG" >> $GITHUB_OUTPUT
-          echo "ais-proxy-tag=$AIS_TAG" >> $GITHUB_OUTPUT
-          echo "tileserver-gl-tag=$TILESERVER_TAG" >> $GITHUB_OUTPUT
+          echo "ecr-repo-name=$ECR_REPO_NAME" >> $GITHUB_OUTPUT
           echo "Using ECR repository: $ECR_REPO_URI"
-          echo "Building container images with tags: $WEATHER_TAG, $AIS_TAG, $TILESERVER_TAG"
       
-      - name: Check Enabled Containers
+      - name: Discover Enabled Containers
         id: containers
         run: |
-          WEATHER_ENABLED=$(jq -r '.context."dev-test".containers."weather-proxy".enabled' cdk.json)
-          AIS_ENABLED=$(jq -r '.context."dev-test".containers."ais-proxy".enabled' cdk.json)
-          TILESERVER_ENABLED=$(jq -r '.context."dev-test".containers."tileserver-gl".enabled' cdk.json)
+          # Get all enabled containers dynamically
+          CONTAINERS=$(jq -r '.context["dev-test"].containers | to_entries[] | select(.value.enabled == true) | .key' cdk.json)
+          echo "enabled-containers<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTAINERS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
           
-          echo "weather-enabled=$WEATHER_ENABLED" >> $GITHUB_OUTPUT
-          echo "ais-enabled=$AIS_ENABLED" >> $GITHUB_OUTPUT
-          echo "tileserver-enabled=$TILESERVER_ENABLED" >> $GITHUB_OUTPUT
+          echo "Enabled containers:"
+          echo "$CONTAINERS"
       
       - name: Login to Amazon ECR
         run: |
           aws ecr get-login-password --region ${{ secrets.DEMO_AWS_REGION }} | \
             docker login --username AWS --password-stdin \
-            ${{ steps.tags.outputs.ecr-repo-uri }}
+            ${{ steps.ecr.outputs.ecr-repo-uri }}
       
       - name: Build and Push Container Images
+        id: build
         run: |
-          ECR_REPO_NAME=$(echo ${{ steps.tags.outputs.ecr-repo-uri }} | cut -d'/' -f2)
+          ECR_REPO_NAME="${{ steps.ecr.outputs.ecr-repo-name }}"
+          ECR_REPO_URI="${{ steps.ecr.outputs.ecr-repo-uri }}"
           
-          # Build weather-proxy if enabled
-          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
-            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.weather-proxy-tag }} >/dev/null 2>&1; then
-              echo "✅ Weather proxy image already exists, skipping build"
-            else
-              echo "🔨 Building weather-proxy image"
-              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }} ./weather-proxy
-              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.weather-proxy-tag }}
-              echo "✅ Weather proxy image pushed"
-            fi
-          fi
+          # Initialize JSON object for image tags
+          IMAGE_TAGS_JSON="{}"
           
-          # Build ais-proxy if enabled
-          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
-            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.ais-proxy-tag }} >/dev/null 2>&1; then
-              echo "✅ AIS proxy image already exists, skipping build"
+          # Build each enabled container
+          while IFS= read -r container; do
+            if [[ -z "$container" ]]; then continue; fi
+            
+            # Get version from cdk.json
+            VERSION=$(jq -r ".context[\"dev-test\"].containers[\"$container\"].imageTag" cdk.json)
+            
+            # Generate tag
+            if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              TAG="$container-${TIMESTAMP}"
             else
-              echo "🔨 Building ais-proxy image"
-              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }} ./ais-proxy
-              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.ais-proxy-tag }}
-              echo "✅ AIS proxy image pushed"
+              TAG="$container-${VERSION}"
             fi
-          fi
+            
+            # Check if image already exists
+            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=$TAG >/dev/null 2>&1; then
+              echo "✅ $container image already exists, skipping build"
+            else
+              echo "🔨 Building $container image"
+              docker build --platform linux/amd64 -t $ECR_REPO_URI:$TAG ./$container
+              docker push $ECR_REPO_URI:$TAG
+              echo "✅ $container image pushed"
+            fi
+            
+            # Add to JSON object
+            IMAGE_TAGS_JSON=$(echo $IMAGE_TAGS_JSON | jq --arg key "$container" --arg value "$TAG" '. + {($key): $value}')
+            
+          done <<< "${{ steps.containers.outputs.enabled-containers }}"
           
-          # Build tileserver-gl if enabled
-          if [[ "${{ steps.containers.outputs.tileserver-enabled }}" == "true" ]]; then
-            if aws ecr describe-images --repository-name $ECR_REPO_NAME --image-ids imageTag=${{ steps.tags.outputs.tileserver-gl-tag }} >/dev/null 2>&1; then
-              echo "✅ TileServer GL image already exists, skipping build"
-            else
-              echo "🔨 Building tileserver-gl image"
-              docker build --platform linux/amd64 -t ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tileserver-gl-tag }} ./tileserver-gl
-              docker push ${{ steps.tags.outputs.ecr-repo-uri }}:${{ steps.tags.outputs.tileserver-gl-tag }}
-              echo "✅ TileServer GL image pushed"
-            fi
-          fi
+          # Output JSON for deploy workflows
+          echo "image-tags-json=$IMAGE_TAGS_JSON" >> $GITHUB_OUTPUT
+          echo "Built image tags: $IMAGE_TAGS_JSON"
           
 
       
       - name: Output Image Information
         run: |
           echo "✅ Successfully built and pushed Docker images:"
-          if [[ "${{ steps.containers.outputs.weather-enabled }}" == "true" ]]; then
-            echo "📦 Weather Proxy: ${{ steps.tags.outputs.weather-proxy-tag }}"
-          fi
-          if [[ "${{ steps.containers.outputs.ais-enabled }}" == "true" ]]; then
-            echo "📦 AIS Proxy: ${{ steps.tags.outputs.ais-proxy-tag }}"
-          fi
-          if [[ "${{ steps.containers.outputs.tileserver-enabled }}" == "true" ]]; then
-            echo "📦 TileServer GL: ${{ steps.tags.outputs.tileserver-gl-tag }}"
-          fi
+          echo "${{ steps.build.outputs.image-tags-json }}" | jq -r 'to_entries[] | "📦 \(.key): \(.value)"'
           echo ""
           echo "🚀 To deploy with these images, use:"
-          echo "npm run cdk deploy -- --context usePreBuiltImages=true"
+          echo "npm run cdk deploy -- --context usePreBuiltImages=true --context imageTagsJson='${{ steps.build.outputs.image-tags-json }}'"
