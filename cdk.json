@@ -24,8 +24,8 @@
       "stackName": "Dev",
       "utilsHostname": "utils",
       "ecs": {
-        "taskCpu": 512,
-        "taskMemory": 1024,
+        "taskCpu": 2048,
+        "taskMemory": 4096,
         "desiredCount": 1,
         "enableDetailedLogging": true,
         "enableEcsExec": true
@@ -39,7 +39,7 @@
           "cpu": 256,
           "memory": 512,
           "priority": 1,
-          "imageTag": "v2025-08-04"
+          "imageTag": "v1.0.0"
         },
         "ais-proxy": {
           "enabled": true,
@@ -49,7 +49,18 @@
           "cpu": 256,
           "memory": 512,
           "priority": 2,
-          "imageTag": "v2025-08-06"
+          "imageTag": "v1.0.0"
+        },
+
+        "tileserver-gl": {
+          "enabled": true,
+          "hostname": "tiles",
+          "healthCheckPath": "/health",
+          "port": 8080,
+          "cpu": 2048,
+          "memory": 4096,
+          "priority": 3,
+          "imageTag": "v1.0.0"
         }
       },
       "general": {
@@ -58,14 +69,24 @@
       },
       "docker": {
         "usePreBuiltImages": false
+      },
+      "cloudfront": {
+        "tileserver": {
+          "enabled": true,
+          "cacheTtl": {
+            "tiles": "30d",
+            "metadata": "1h",
+            "health": "0s"
+          }
+        }
       }
     },
     "prod": {
       "stackName": "Prod",
       "utilsHostname": "utils",
       "ecs": {
-        "taskCpu": 1024,
-        "taskMemory": 2048,
+        "taskCpu": 2048,
+        "taskMemory": 4096,
         "desiredCount": 1,
         "enableDetailedLogging": false,
         "enableEcsExec": false
@@ -90,6 +111,17 @@
           "memory": 1024,
           "priority": 2,
           "imageTag": "v2025-08-04"
+        },
+
+        "tileserver-gl": {
+          "enabled": true,
+          "hostname": "tiles",
+          "healthCheckPath": "/health",
+          "port": 8080,
+          "cpu": 2048,
+          "memory": 4096,
+          "priority": 3,
+          "imageTag": "v1.0.0"
         }
       },
       "general": {
@@ -98,6 +130,16 @@
       },
       "docker": {
         "usePreBuiltImages": true
+      },
+      "cloudfront": {
+        "tileserver": {
+          "enabled": true,
+          "cacheTtl": {
+            "tiles": "30d",
+            "metadata": "1h",
+            "health": "0s"
+          }
+        }
       }
     },
     "etl-utils-defaults": {

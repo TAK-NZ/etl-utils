@@ -1,0 +1,30 @@
+{
+  "version": 8,
+  "name": "NZ Emergency Management",
+  "attribution": "© <a href='http://creativecommons.org/licenses/by-nc-nd/4.0/'>NationalMap WMS Basemap Service CC BY-NC-ND 4.0</a>",
+  "sources": {
+    "wms-source": {
+      "type": "raster",
+      "tiles": [
+        "https://maps.nationalmap.co.nz/wms?authkey=PLACEHOLDER_AUTH_KEY&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=NationalMap:NationalMap%20Emergency%20Management&STYLES=&FORMAT=image/png&TRANSPARENT=TRUE&SRS=EPSG:3857&WIDTH=256&HEIGHT=256&BBOX={bbox-epsg-3857}"
+      ],
+      "tileSize": 256,
+      "scheme": "xyz",
+      "minzoom": 0,
+      "maxzoom": 20
+    }
+  },
+  "layers": [
+    {
+      "id": "wms-layer",
+      "type": "raster",
+      "source": "wms-source",
+      "paint": {},
+      "layout": {
+        "visibility": "visible"
+      }
+    }
+  ],
+  "center": [174.7763921, -41.2865302],
+  "zoom": 12
+}

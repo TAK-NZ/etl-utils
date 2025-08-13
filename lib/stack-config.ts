@@ -8,12 +8,13 @@
  */
 export interface ContainerConfig {
   enabled: boolean;
-  path: string;
+  path?: string;
+  hostname?: string;
   healthCheckPath: string;
   port: number;
   cpu: number;
   memory: number;
-  priority: number;
+  priority?: number;
   imageTag: string;
 }
 
@@ -39,5 +40,15 @@ export interface ContextEnvironmentConfig {
   };
   docker: {
     usePreBuiltImages: boolean;
+  };
+  cloudfront?: {
+    tileserver?: {
+      enabled: boolean;
+      cacheTtl?: {
+        tiles?: string;
+        metadata?: string;
+        health?: string;
+      };
+    };
   };
 }
