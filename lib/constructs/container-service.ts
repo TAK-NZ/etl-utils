@@ -119,9 +119,8 @@ export class ContainerService extends Construct {
       efsAccessPoint
     } = props;
 
-    // Create CloudWatch log group
+    // Create CloudWatch log group - let CDK generate unique name to avoid conflicts
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/ecs/TAK-${contextConfig.stackName}-ETL-Utils-${containerName}`,
       retention: environment === 'prod' ? logs.RetentionDays.ONE_MONTH : logs.RetentionDays.ONE_WEEK,
       removalPolicy: contextConfig.general.removalPolicy === 'DESTROY' ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });

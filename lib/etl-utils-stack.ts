@@ -228,6 +228,17 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // Determine container image strategy
     const usePreBuiltImages = this.node.tryGetContext('usePreBuiltImages') ?? envConfig.docker.usePreBuiltImages;
+    
+    // Parse image tags from JSON context if provided
+    let imageTagsMap: { [key: string]: string } = {};
+    const imageTagsJson = this.node.tryGetContext('imageTagsJson');
+    if (imageTagsJson) {
+      try {
+        imageTagsMap = JSON.parse(imageTagsJson);
+      } catch (error) {
+        throw new Error(`Failed to parse imageTagsJson context: ${error}`);
+      }
+    }
 
     // Deploy each enabled container
     Object.entries(envConfig.containers).forEach(([containerName, containerConfig]) => {
@@ -238,14 +249,20 @@ export class EtlUtilsStack extends cdk.Stack {
       // Determine container image URI for dual image strategy
       let containerImageUri: string | undefined;
       if (usePreBuiltImages) {
-        // Convert container name to camelCase for context variable (weather-proxy -> weatherProxy)
-        const contextVarName = containerName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase()) + 'ImageTag';
-        const contextImageTag = this.node.tryGetContext(contextVarName);
-        const configImageTag = containerConfig.imageTag;
-        const imageTag = (contextImageTag && contextImageTag.trim() !== '') ? contextImageTag : configImageTag;
+        // Get image tag from JSON context, fallback to individual context, then config
+        let imageTag: string | undefined;
+        
+        if (imageTagsMap[containerName]) {
+          imageTag = imageTagsMap[containerName];
+        } else {
+          // Fallback to individual context variables for backward compatibility
+          const contextVarName = containerName.replace(/-([a-z])/g, (match, letter) => letter.toUpperCase()) + 'ImageTag';
+          const contextImageTag = this.node.tryGetContext(contextVarName);
+          imageTag = (contextImageTag && contextImageTag.trim() !== '') ? contextImageTag : containerConfig.imageTag;
+        }
         
         if (!imageTag) {
-          throw new Error(`No image tag found for container '${containerName}'. Context '${contextVarName}': ${contextImageTag}, Config: ${configImageTag}`);
+          throw new Error(`No image tag found for container '${containerName}'. JSON context: ${imageTagsMap[containerName]}, Config: ${containerConfig.imageTag}`);
         }
         
         // Get ECR repository ARN from BaseInfra and extract repository name
