@@ -1,5 +1,5 @@
 {
-  "name": "etl-utils-infra",
+  "name": "etl-utils",
   "version": "1.0.0",
   "description": "CDK Infrastructure for ETL Utilities - Multiple Docker containers on ECS Fargate",
   "main": "lib/etl-utils-stack.js",
@@ -42,6 +42,6 @@
     "ecs",
     "fargate"
   ],
-  "author": "TAK-NZ",
-  "license": "MIT"
+  "author": "Christian Elsen <chris@elsen.nz>",
+  "license": "AGPL-3.0-only"
 }
