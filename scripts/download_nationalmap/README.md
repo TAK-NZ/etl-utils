@@ -1,4 +1,19 @@
-# NationalMap Tile Download Monitoring Guide
+# NationalMap Tile Download Scripts
+
+## Configuration
+
+### Auth Key Setup
+For security, set the auth key as an environment variable:
+
+```bash
+# Set auth key
+export AUTH_KEY="your-key"
+
+# Update script to read from environment
+AUTH_KEY="${AUTH_KEY:-YOUR_NATIONALMAP_AUTH_KEY_HERE}"
+```
+
+## Monitoring Guide
 
 ## Quick Status Check
 

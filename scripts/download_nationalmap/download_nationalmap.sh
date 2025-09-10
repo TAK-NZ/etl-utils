@@ -3,7 +3,7 @@
 # NationalMap Emergency Management Tile Downloader
 # Downloads tiles in background with resume capability
 
-AUTH_KEY="YOUR_NATIONALMAP_AUTH_KEY_HERE"
+AUTH_KEY="${AUTH_KEY:-YOUR_NATIONALMAP_AUTH_KEY_HERE}"
 MAX_ZOOM=15
 LOG_FILE="nationalmap_download.log"
 PID_FILE="nationalmap_download.pid"
