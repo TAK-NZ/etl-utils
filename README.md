@@ -210,6 +210,9 @@ npm run test:coverage
 # Test with custom API keys and image tags
 cdk deploy --context apiKeys='["test-key"]' --context imageTagsJson='{"weather-proxy":"test-v1.0.0"}'
 
+# Force re-download of MBTiles from S3 (useful when updating tile data)
+cdk deploy --context envType=dev-test --context forceDownload=true
+
 # GitHub Actions deployment uses TILESERVER_API_KEYS secret and imageTagsJson automatically
 ```
 

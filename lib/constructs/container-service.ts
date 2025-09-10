@@ -12,7 +12,8 @@ import {
   Duration,
   RemovalPolicy,
   Fn,
-  Token
+  Token,
+  Stack
 } from 'aws-cdk-lib';
 import type { ContextEnvironmentConfig, ContainerConfig } from '../stack-config';
 import { createBaseImportValue, BASE_EXPORT_NAMES } from '../cloudformation-imports';
@@ -149,6 +150,62 @@ export class ContainerService extends Construct {
       });
     }
 
+    // Add init container for tileserver-gl MBTiles download
+    let initContainer: ecs.ContainerDefinition | undefined;
+    if (containerName === 'tileserver-gl' && containerConfig.mbtiles?.enabled && efsAccessPoint) {
+      initContainer = this.taskDefinition.addContainer('TileDownloader', {
+        containerName: 'tile-downloader',
+        image: ecs.ContainerImage.fromRegistry('alpine:latest'),
+        essential: false,
+        memoryReservationMiB: 512,
+        cpu: 256,
+        logging: ecs.LogDrivers.awsLogs({
+          streamPrefix: 'tile-downloader',
+          logGroup: logGroup,
+        }),
+        environment: {
+          S3_BUCKET: environmentVariables.S3_BUCKET || '',
+          S3_KEY: containerConfig.mbtiles.s3Key,
+          TILE_FILE: containerConfig.mbtiles.filename,
+          AWS_DEFAULT_REGION: Stack.of(this).region,
+          FORCE_DOWNLOAD: environmentVariables.FORCE_DOWNLOAD || 'false'
+        },
+        command: [
+          '/bin/sh',
+          '-c',
+          `set -e && 
+           echo "Installing AWS CLI..." && 
+           apk add --no-cache aws-cli curl && 
+           echo "AWS CLI installed" && 
+           TILE_PATH="/tiles/$TILE_FILE" && 
+           S3_PATH="s3://$S3_BUCKET/$S3_KEY" && 
+           echo "Checking for tile file: $TILE_PATH" && 
+           echo "Available memory: $(free -h)" && 
+           echo "Available disk space: $(df -h /tiles)" && 
+           if [ "$FORCE_DOWNLOAD" = "true" ] || [ ! -f "$TILE_PATH" ]; then 
+             if [ "$FORCE_DOWNLOAD" = "true" ] && [ -f "$TILE_PATH" ]; then 
+               echo "FORCE_DOWNLOAD=true - removing existing file" && 
+               rm "$TILE_PATH"; 
+             fi && 
+             echo "Downloading MBTiles from S3: $S3_PATH" && 
+             echo "Target path: $TILE_PATH" && 
+             aws s3 cp "$S3_PATH" "$TILE_PATH" --no-progress && 
+             echo "Download completed: $(ls -lh $TILE_PATH)" && 
+             echo "File size: $(du -h $TILE_PATH)"; 
+           else 
+             echo "Tile file already exists: $(ls -lh $TILE_PATH)"; 
+           fi && 
+           echo "Tile preparation complete - container will exit successfully"`
+        ]
+      });
+
+      initContainer.addMountPoints({
+        sourceVolume: 'efs-volume',
+        containerPath: '/tiles',
+        readOnly: false
+      });
+    }
+
     // Determine container image
     let containerImage: ecs.ContainerImage;
     if (containerImageUri) {
@@ -198,6 +255,12 @@ export class ContainerService extends Construct {
           containerPath: '/data',
           readOnly: false
         });
+      } else if (containerName === 'tileserver-gl') {
+        container.addMountPoints({
+          sourceVolume: 'efs-volume',
+          containerPath: '/data/tiles',
+          readOnly: true
+        });
       } else if (containerName === 'mapproxy') {
         container.addMountPoints({
           sourceVolume: 'efs-volume',
@@ -205,6 +268,14 @@ export class ContainerService extends Construct {
           readOnly: false
         });
       }
+    }
+
+    // Add container dependencies for init containers
+    if (initContainer) {
+      container.addContainerDependencies({
+        container: initContainer,
+        condition: ecs.ContainerDependencyCondition.SUCCESS
+      });
     }
 
     // Create target group
@@ -235,7 +306,6 @@ export class ContainerService extends Construct {
       assignPublicIp: false, // Deploy in private subnets
       enableExecuteCommand: contextConfig.ecs.enableEcsExec,
       healthCheckGracePeriod: Duration.seconds(120),
-
     });
 
     // Attach service to target group
