@@ -24,6 +24,7 @@ export const BASE_EXPORT_NAMES = {
   CERTIFICATE_ARN: 'CertificateArn',
   HOSTED_ZONE_ID: 'HostedZoneId',
   HOSTED_ZONE_NAME: 'HostedZoneName',
+  ARTIFACTS_BUCKET: 'AppImagesBucket',
 
 } as const;
 

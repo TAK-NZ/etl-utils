@@ -133,6 +133,21 @@ export class EtlUtilsStack extends cdk.Stack {
       }
     });
 
+    // Create EFS access point for tileserver-gl
+    const tileserverAccessPoint = new efs.AccessPoint(this, 'TileserverAccessPoint', {
+      fileSystem: efsFileSystem,
+      posixUser: {
+        uid: '1001',
+        gid: '1001'
+      },
+      path: '/tiles',
+      createAcl: {
+        ownerUid: '1001',
+        ownerGid: '1001',
+        permissions: '755'
+      }
+    });
+
     // =================
     // CREATE API AUTHENTICATION
     // =================
@@ -204,7 +219,7 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // S3 permissions already granted above for config bucket access
 
-    // Add EFS permissions for task role (needed for ais-proxy)
+    // Add EFS permissions for task role (needed for ais-proxy and tileserver-gl)
     taskRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
@@ -216,8 +231,23 @@ export class EtlUtilsStack extends cdk.Stack {
       ],
       resources: [
         `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${efsFileSystem.fileSystemId}`,
-        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${aisProxyAccessPoint.accessPointId}`,
+        `arn:aws:elasticfilesystem:${this.region}:${this.account}:access-point/${tileserverAccessPoint.accessPointId}`
       ]
+    }));
+
+    // Add S3 permissions for MBTiles download (tileserver-gl)
+    const artifactsBucketName = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ARTIFACTS_BUCKET));
+    const artifactsBucketArn = `arn:aws:s3:::${cdk.Token.asString(artifactsBucketName)}`;
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['s3:GetObject'],
+      resources: [`${artifactsBucketArn}/*`]
+    }));
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['s3:ListBucket'],
+      resources: [artifactsBucketArn]
     }));
 
     // =================
@@ -283,7 +313,11 @@ export class EtlUtilsStack extends cdk.Stack {
       } else if (containerName === 'tileserver-gl') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-TileServer-GL-Api-Keys.json';
-        // API keys loaded from S3 config file
+        // Add S3 bucket for MBTiles if enabled
+        if (containerConfig.mbtiles?.enabled) {
+          const artifactsBucketName = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ARTIFACTS_BUCKET));
+          environmentVariables.S3_BUCKET = cdk.Token.asString(artifactsBucketName);
+        }
       }
 
       // Create container service
@@ -299,7 +333,8 @@ export class EtlUtilsStack extends cdk.Stack {
         containerImageUri,
         environmentVariables,
         stackNameComponent,
-        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : undefined,
+        efsAccessPoint: containerName === 'ais-proxy' ? aisProxyAccessPoint : 
+                       containerName === 'tileserver-gl' ? tileserverAccessPoint : undefined,
       });
 
       containerServices[containerName] = containerService;

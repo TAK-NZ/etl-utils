@@ -3,6 +3,13 @@
   "name": "NZ Emergency Management",
   "attribution": "© <a href='http://creativecommons.org/licenses/by-nc-nd/4.0/'>NationalMap WMS Basemap Service CC BY-NC-ND 4.0</a>",
   "sources": {
+    "mbtiles-source": {
+      "type": "raster",
+      "url": "mbtiles://./tiles/nz_nationalmap_emergency.mbtiles",
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 15
+    },
     "wms-source": {
       "type": "raster",
       "tiles": [
@@ -10,13 +17,22 @@
       ],
       "tileSize": 256,
       "scheme": "xyz",
-      "minzoom": 0,
+      "minzoom": 16,
       "maxzoom": 20
     }
   },
   "layers": [
     {
-      "id": "wms-layer",
+      "id": "cached-tiles",
+      "type": "raster",
+      "source": "mbtiles-source",
+      "paint": {},
+      "layout": {
+        "visibility": "visible"
+      }
+    },
+    {
+      "id": "high-zoom-tiles",
       "type": "raster",
       "source": "wms-source",
       "paint": {},

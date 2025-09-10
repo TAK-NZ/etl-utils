@@ -60,7 +60,12 @@
           "cpu": 2048,
           "memory": 4096,
           "priority": 3,
-          "imageTag": "v1.0.0"
+          "imageTag": "v1.0.0",
+          "mbtiles": {
+            "enabled": true,
+            "s3Key": "nz_nationalmap_emergency.mbtiles",
+            "filename": "nz_nationalmap_emergency.mbtiles"
+          }
         }
       },
       "general": {
@@ -121,7 +126,12 @@
           "cpu": 2048,
           "memory": 4096,
           "priority": 3,
-          "imageTag": "v1.0.0"
+          "imageTag": "v1.0.0",
+          "mbtiles": {
+            "enabled": true,
+            "s3Key": "nz_nationalmap_emergency.mbtiles",
+            "filename": "nz_nationalmap_emergency.mbtiles"
+          }
         }
       },
       "general": {
