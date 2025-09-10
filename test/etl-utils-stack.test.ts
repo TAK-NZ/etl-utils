@@ -33,7 +33,7 @@ describe('EtlUtilsStack', () => {
     
     // Check EFS file system
     template.resourceCountIs('AWS::EFS::FileSystem', 1);
-    template.resourceCountIs('AWS::EFS::AccessPoint', 1);
+    template.resourceCountIs('AWS::EFS::AccessPoint', 2); // ais-proxy and tileserver-gl
   });
 
   it('creates stack with production configuration', () => {

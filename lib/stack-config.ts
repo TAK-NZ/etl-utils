@@ -4,6 +4,15 @@
  */
 
 /**
+ * MBTiles configuration for tileserver-gl
+ */
+export interface MBTilesConfig {
+  enabled: boolean;
+  s3Key: string;
+  filename: string;
+}
+
+/**
  * Container configuration for individual services
  */
 export interface ContainerConfig {
@@ -16,6 +25,7 @@ export interface ContainerConfig {
   memory: number;
   priority?: number;
   imageTag: string;
+  mbtiles?: MBTilesConfig;
 }
 
 /**
