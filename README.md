@@ -24,10 +24,11 @@ Weather radar proxy service providing access to real-time radar data from [Rain 
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
 ### ais-proxy
-AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with enhanced Class B vessel name lookup.
+AISHub-compatible proxy service providing access to real-time AIS vessel data from AISStream with enhanced Class B vessel name lookup, plus Auckland Transport ferry positions.
 
 - **Path**: `/ais-proxy/*`
 - **Health Check**: `/ais-proxy/health`
+- **Data Sources**: AISStream WebSocket + Auckland Transport ferry API
 - **Documentation**: [AIS Proxy API](docs/AIS_PROXY.md)
 
 ### tileserver-gl
