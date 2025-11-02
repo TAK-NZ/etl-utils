@@ -28,6 +28,7 @@ const RATE_LIMIT_PER_MINUTE = 600;
 const NAME_LOOKUP_DELAY = 5000; // 5 seconds between lookups (more conservative due to rate limiting)
 const MAX_LOOKUP_RETRIES = 3;
 const LOOKUP_BACKOFF_MULTIPLIER = 2;
+const AT_FERRY_POLL_INTERVAL = 15000; // 15 seconds
 
 // Circuit breaker for VesselFinder API
 let circuitBreakerState = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
@@ -78,6 +79,156 @@ async function loadApiKeys() {
 async function getAISStreamKey() {
   const keys = await loadApiKeys();
   return keys.aisstream?.primary?.key || keys.aisstream?.backup?.key;
+}
+
+// Get Auckland Transport API key
+async function getATApiKey() {
+  const keys = await loadApiKeys();
+  return keys.aucklandTransport?.key;
+}
+
+// Fetch Auckland Transport ferry positions
+async function fetchATFerryPositions() {
+  const atApiKey = await getATApiKey();
+  if (!atApiKey) {
+    if (DEBUG) console.log('No Auckland Transport API key available, skipping ferry fetch');
+    return null;
+  }
+  
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    const response = await fetch('https://api.at.govt.nz/realtime/legacy/ferrypositions', {
+      signal: controller.signal,
+      headers: {
+        'Ocp-Apim-Subscription-Key': atApiKey,
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      console.warn(`AT Ferry API returned ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (data.status !== 'OK' || !Array.isArray(data.response)) {
+      console.warn('Invalid AT Ferry API response format:', { status: data.status, responseType: typeof data.response });
+      return null;
+    }
+    
+    console.log(`Fetched ${data.response.length} ferry positions from AT API`);
+    if (DEBUG && data.response.length > 0) {
+      console.log('Sample ferry data:', JSON.stringify(data.response[0], null, 2));
+    }
+    return data.response;
+    
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      console.warn('AT Ferry API request timeout');
+    } else {
+      console.warn('AT Ferry API request failed:', sanitizeLogInput(String(error.message)));
+    }
+    return null;
+  }
+}
+
+// Process AT ferry data into vessel cache
+function processATFerryData(ferries) {
+  if (!Array.isArray(ferries)) {
+    console.warn('processATFerryData: ferries is not an array:', typeof ferries);
+    return;
+  }
+  
+  console.log(`Processing ${ferries.length} AT ferry records`);
+  let processed = 0;
+  let skipped = 0;
+  
+  for (const ferry of ferries) {
+    try {
+      const mmsi = ferry.mmsi;
+      if (!mmsi || mmsi < 100000000 || mmsi > 999999999) {
+        if (DEBUG) console.log(`Skipping ferry with invalid MMSI: ${mmsi}`);
+        skipped++;
+        continue;
+      }
+      
+      // Convert timestamp to AIS format
+      const timestamp = new Date(ferry.timestamp).toISOString();
+      
+      let vessel = vesselCache.get(mmsi) || {
+        MMSI: mmsi,
+        NAME: '',
+        CALLSIGN: '',
+        DEST: '',
+        TYPE: 60, // Passenger ship (ferry)
+        IMO: null,
+        DRAUGHT: null,
+        A: null,
+        B: null,
+        C: null,
+        D: null,
+        ETA: null,
+        _rateOfTurn: null,
+        _positionAccuracy: null,
+        _timestamp: null,
+        _aisVersion: null,
+        _fixType: null,
+        _valid: null,
+        _messageType: 'ATFerryPosition',
+        _nameSource: null,
+        _nameLastLookup: null,
+        _lookupCountry: null,
+        _lookupGrossTonnage: null,
+        _lookupDeadweight: null,
+        _lookupYearBuilt: null,
+        _lookupTypeText: null
+      };
+      
+      // Always use AT ferry position data (polled every 30s, more current)
+      vessel.TIME = new Date(ferry.timestamp).toISOString().replace('T', ' ').replace('Z', ' UTC');
+      vessel.LONGITUDE = ferry.lng;
+      vessel.LATITUDE = ferry.lat;
+      vessel.COG = 0; // AT API doesn't provide movement data, use 0 instead of null
+      vessel.SOG = 0; // Use 0 instead of null for better ETL compatibility
+      vessel.HEADING = 0; // Use 0 instead of null
+      vessel.NAVSTAT = 5; // Moored (appropriate for ferries at terminals)
+      vessel._messageType = 'ATFerryPosition';
+      vessel.lastUpdate = new Date();
+      
+      // Set ferry-specific data
+      if (ferry.vessel && ferry.vessel.trim()) {
+        vessel.NAME = ferry.vessel.trim();
+        vessel._nameSource = 'at_api';
+      }
+      if (ferry.callsign && ferry.callsign.trim()) {
+        vessel.CALLSIGN = ferry.callsign.trim();
+      }
+      if (ferry.operator && ferry.operator.trim()) {
+        vessel._atOperator = ferry.operator.trim();
+      }
+      if (ferry.eta && ferry.eta.trim()) {
+        vessel.ETA = ferry.eta.trim();
+      }
+      
+      vessel.TYPE = 60; // Ferry type
+      
+      vesselCache.set(mmsi, vessel);
+      processed++;
+      
+      console.log(`✅ Updated AT ferry: MMSI ${mmsi}, Name: "${vessel.NAME}", Operator: ${vessel._atOperator}`);
+      
+    } catch (error) {
+      console.warn('Error processing AT ferry data:', sanitizeLogInput(String(error.message)));
+      skipped++;
+    }
+  }
+  
+  console.log(`AT ferry processing complete: ${processed} processed, ${skipped} skipped`);
 }
 
 // Validate user API key
@@ -692,7 +843,7 @@ function processAISMessage(message) {
     
     // Update common fields
     vessel.MMSI = mmsi;
-    vessel.TIME = message.MetaData.time_utc;
+    vessel.TIME = new Date(message.MetaData.time_utc).toISOString().replace('T', ' ').replace('Z', ' UTC');
     vessel.LONGITUDE = lon;
     vessel.LATITUDE = lat;
     vessel.lastUpdate = new Date();
@@ -887,9 +1038,7 @@ function processAISMessage(message) {
       }
     }
     
-    if (DEBUG && (vessel.MMSI === 512009284 || vessel.MMSI === 512009382)) {
-      console.log(`Not queueing lookup for MMSI ${mmsi}: NAME=${sanitizeLogInput(String(vessel.NAME || ''))}, TYPE=${vessel.TYPE}, messageType=${sanitizeLogInput(String(vessel._messageType || ''))}`);
-    }
+
     
     // Save cache occasionally
     if (Math.random() < 0.01) saveCache();
@@ -993,6 +1142,42 @@ app.get('/ais-proxy/ws.php', async (req, res) => {
   res.json({ VESSELS: vessels });
 });
 
+// Start AT ferry polling
+let atFerryInterval = null;
+
+async function startATFerryPolling() {
+  if (atFerryInterval) return;
+  
+  console.log('Starting AT ferry position polling');
+  
+  // Check if we have AT API key
+  const atApiKey = await getATApiKey();
+  if (!atApiKey) {
+    console.warn('⚠️ No Auckland Transport API key configured - ferry polling disabled');
+    return;
+  }
+  console.log('✅ Auckland Transport API key configured');
+  
+  // Initial fetch
+  fetchATFerryPositions().then(ferries => {
+    if (ferries) processATFerryData(ferries);
+  });
+  
+  // Set up interval
+  atFerryInterval = setInterval(async () => {
+    const ferries = await fetchATFerryPositions();
+    if (ferries) processATFerryData(ferries);
+  }, AT_FERRY_POLL_INTERVAL);
+}
+
+function stopATFerryPolling() {
+  if (atFerryInterval) {
+    clearInterval(atFerryInterval);
+    atFerryInterval = null;
+    console.log('Stopped AT ferry position polling');
+  }
+}
+
 // Enhanced v2 API endpoint
 app.get('/ais-proxy/v2/vessels', async (req, res) => {
   const { username, latmin, latmax, lonmin, lonmax, include } = req.query;
@@ -1079,6 +1264,8 @@ app.get('/ais-proxy/v2/vessels', async (req, res) => {
         // Easy identification
         category: isNavigationAid ? 'navigation-aid' : 'vessel',
         nameSource: vessel._nameSource,
+        // AT Ferry specific data
+        atOperator: vessel._atOperator || null,
         // Enriched data from lookup
         enrichedData: vessel._nameSource === 'lookup' ? {
           country: vessel._lookupCountry,
@@ -1137,6 +1324,8 @@ app.get('/ais-proxy/health', async (req, res) => {
       uptime: process.uptime(),
       user_keys_configured: enabledUserKeys,
       aisstream_key_configured: hasAISStreamKey,
+      at_api_key_configured: !!(keys.aucklandTransport?.key),
+      at_ferry_polling: !!atFerryInterval,
       public_mode: !!keys._publicMode,
       config_bucket: !!CONFIG_BUCKET
     });
@@ -1229,6 +1418,89 @@ app.post('/ais-proxy/debug/queue-lookup/:mmsi', async (req, res) => {
   });
 });
 
+// Debug endpoint to show AT ferry vessels in cache
+app.get('/ais-proxy/debug/ferries', async (req, res) => {
+  const { username } = req.query;
+  
+  // Validate user API key
+  const keyValidation = await validateUserApiKey(username);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const ferries = [];
+  for (const [mmsi, vessel] of vesselCache.entries()) {
+    if (vessel._messageType === 'ATFerryPosition') {
+      ferries.push({
+        mmsi: vessel.MMSI,
+        name: vessel.NAME,
+        operator: vessel._atOperator,
+        latitude: vessel.LATITUDE,
+        longitude: vessel.LONGITUDE,
+        lastUpdate: vessel.lastUpdate,
+        time: vessel.TIME
+      });
+    }
+  }
+  
+  res.json({
+    ferryCount: ferries.length,
+    totalVessels: vesselCache.size,
+    ferries: ferries.sort((a, b) => a.name.localeCompare(b.name)),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Manual AT ferry fetch endpoint for debugging
+app.get('/ais-proxy/debug/fetch-ferries', async (req, res) => {
+  const { username } = req.query;
+  
+  // Validate user API key
+  const keyValidation = await validateUserApiKey(username);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  try {
+    console.log('Manual AT ferry fetch requested');
+    const ferries = await fetchATFerryPositions();
+    
+    if (ferries) {
+      const beforeCount = vesselCache.size;
+      processATFerryData(ferries);
+      const afterCount = vesselCache.size;
+      
+      res.json({
+        success: true,
+        ferriesReceived: ferries.length,
+        vesselCacheBefore: beforeCount,
+        vesselCacheAfter: afterCount,
+        ferries: ferries.map(f => ({
+          mmsi: f.mmsi,
+          vessel: f.vessel,
+          operator: f.operator,
+          lat: f.lat,
+          lng: f.lng,
+          timestamp: f.timestamp
+        })),
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.json({
+        success: false,
+        message: 'Failed to fetch ferry data',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      error: 'Ferry fetch failed',
+      message: sanitizeLogInput(String(error.message)),
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // Enhanced v2 health endpoint
 app.get('/ais-proxy/v2/health', async (req, res) => {
   try {
@@ -1270,6 +1542,8 @@ app.get('/ais-proxy/v2/health', async (req, res) => {
       configuration: {
         userKeysConfigured: enabledUserKeys,
         aisstreamKeyConfigured: hasAISStreamKey,
+        atApiKeyConfigured: !!(keys.aucklandTransport?.key),
+        atFerryPolling: !!atFerryInterval,
         publicMode: !!keys._publicMode,
         configBucket: !!CONFIG_BUCKET,
         debugMode: DEBUG
@@ -1307,6 +1581,7 @@ process.on('SIGTERM', () => {
   if (pingInterval) {
     clearInterval(pingInterval);
   }
+  stopATFerryPolling();
   saveCache();
   process.exit(0);
 });
@@ -1319,6 +1594,7 @@ process.on('SIGINT', () => {
   if (pingInterval) {
     clearInterval(pingInterval);
   }
+  stopATFerryPolling();
   saveCache();
   process.exit(0);
 });
@@ -1327,24 +1603,7 @@ app.listen(PORT, () => {
   console.log(`AIS Proxy server running on port ${PORT}`);
   loadCache();
   connectToAISStream();
+  startATFerryPolling();
   
-  // Diagnostic: Check if specific MMSI is in cache after startup
-  setTimeout(() => {
-    const testMMSI = 512209480;
-    const vessel = vesselCache.get(testMMSI);
-    if (vessel) {
-      console.log(`🔍 Diagnostic for MMSI ${testMMSI}:`);
-      console.log(`  Name: "${vessel.NAME}"`);
-      console.log(`  Type: ${vessel.TYPE}`);
-      console.log(`  Message Type: ${vessel._messageType}`);
-      console.log(`  Name Source: ${vessel._nameSource}`);
-      const lastLookup = vessel._nameLastLookup ? 
-        (vessel._nameLastLookup instanceof Date ? vessel._nameLastLookup.toISOString() : vessel._nameLastLookup) : 
-        'never';
-      console.log(`  Last Lookup: ${lastLookup}`);
-      console.log(`  In lookup queue: ${nameLookupQueue.includes(testMMSI)}`);
-    } else {
-      console.log(`🔍 MMSI ${testMMSI} not found in cache`);
-    }
-  }, 5000); // Check after 5 seconds
+
 });
