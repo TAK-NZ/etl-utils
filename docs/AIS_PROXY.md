@@ -67,20 +67,30 @@ Upload AIS data from AIS receivers using the jsonais format (compatible with apr
 - `api_key` - Your API key embedded in the URL path
 
 **Request Body:**
-Array of AIS messages in jsonais format:
+JSONAIS protocol format (aprs.fi compatible):
 ```json
-[
-  {
-    "mmsi": 123456789,
-    "lat": -36.8485,
-    "lon": 174.7633,
-    "cog": 45.2,
-    "sog": 12.5,
-    "heading": 47,
-    "navstat": 0,
-    "timestamp": 1705312200
-  }
-]
+{
+  "protocol": "jsonais",
+  "encodetime": "20241108221500",
+  "groups": [
+    {
+      "path": [{"name": "RECEIVER", "url": "http://example.com/"}],
+      "msgs": [
+        {
+          "msgtype": "18",
+          "mmsi": 123456789,
+          "lat": -36.8485,
+          "lon": 174.7633,
+          "course": 45.2,
+          "speed": 12.5,
+          "heading": 47,
+          "status": 0,
+          "rxtime": "20241108221500"
+        }
+      ]
+    }
+  ]
+}
 ```
 
 **Response:**
