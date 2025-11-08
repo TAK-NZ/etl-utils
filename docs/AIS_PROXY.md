@@ -56,6 +56,70 @@ https://utils.tak.nz/ais-proxy/ws.php?username=your-api-key&latmin=-48&latmax=-3
 }
 ```
 
+### Upload AIS Data
+```
+POST /ais-proxy/jsonais/{api_key}
+```
+
+Upload AIS data from AIS receivers using the jsonais format (compatible with aprs.fi).
+
+**Parameters:**
+- `api_key` - Your API key embedded in the URL path
+
+**Request Body:**
+Array of AIS messages in jsonais format:
+```json
+[
+  {
+    "mmsi": 123456789,
+    "lat": -36.8485,
+    "lon": 174.7633,
+    "cog": 45.2,
+    "sog": 12.5,
+    "heading": 47,
+    "navstat": 0,
+    "timestamp": 1705312200
+  }
+]
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "processed": 1,
+  "errors": 0,
+  "total": 1,
+  "clientId": "j3k4",
+  "timestamp": "2024-01-15T10:30:00.000Z"
+}
+```
+
+### Client Status
+```
+GET /ais-proxy/status?username={api_key}
+```
+
+View status of all AIS upload clients that have provided data in the last 24 hours.
+
+**Response:**
+```json
+{
+  "activeClients": [
+    {
+      "clientId": "j3k4",
+      "lastSeen": "2024-01-15T10:30:00.000Z",
+      "totalMessages": 1250,
+      "lastMessageCount": 15,
+      "hoursAgo": 0.5
+    }
+  ],
+  "totalActiveClients": 1,
+  "timeWindow": "24 hours",
+  "timestamp": "2024-01-15T10:30:00.000Z"
+}
+```
+
 ### Health Check
 ```
 GET /ais-proxy/health
@@ -64,7 +128,8 @@ GET /ais-proxy/health
 Returns service status and configuration information.
 
 ## Rate Limiting
-- **IP-based**: 600 requests per minute per IP address (default)
+- **Query endpoints**: 600 requests per minute per IP address (default)
+- **Upload endpoints**: 100 uploads per minute per API key
 - **API Key-based**: Custom limits per API key (when configured)
 - **Response**: HTTP 429 when exceeded
 

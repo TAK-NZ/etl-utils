@@ -5,6 +5,7 @@ import path from 'path';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const app = express();
+app.use(express.json({ limit: '10mb' }));
 const PORT = process.env.PORT || 3000;
 const CONFIG_BUCKET = process.env.CONFIG_BUCKET;
 const CONFIG_KEY = process.env.CONFIG_KEY || 'ETL-Util-AIS-Proxy-Api-Keys.json';
@@ -17,6 +18,7 @@ const s3Client = new S3Client({ region: process.env.AWS_REGION || 'ap-southeast-
 const vesselCache = new Map();
 const apiKeyCache = new Map();
 const rateLimitCache = new Map();
+const clientStatusCache = new Map(); // Track AIS upload clients
 const MAX_VESSEL_CACHE_SIZE = 50000;
 const MAX_RATE_LIMIT_CACHE_SIZE = 10000;
 const nameLookupQueue = [];
@@ -1327,7 +1329,9 @@ app.get('/ais-proxy/health', async (req, res) => {
       at_api_key_configured: !!(keys.aucklandTransport?.key),
       at_ferry_polling: !!atFerryInterval,
       public_mode: !!keys._publicMode,
-      config_bucket: !!CONFIG_BUCKET
+      config_bucket: !!CONFIG_BUCKET,
+      upload_clients_24h: Array.from(clientStatusCache.values())
+        .filter(status => status.lastSeen > new Date(Date.now() - 24 * 60 * 60 * 1000)).length
     });
   } catch (error) {
     res.status(500).json({
@@ -1501,6 +1505,180 @@ app.get('/ais-proxy/debug/fetch-ferries', async (req, res) => {
   }
 });
 
+// AIS data upload endpoint (jsonais format)
+app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
+  const apiKey = req.params.apiKey;
+  const clientId = apiKey.slice(-4); // Last 4 characters for identification
+  
+  if (!apiKey || apiKey.length < 8) {
+    return res.status(400).json({ error: 'Invalid API key format' });
+  }
+  
+  // Validate API key (use existing user validation)
+  const keyValidation = await validateUserApiKey(apiKey);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+  }
+  
+  // Rate limiting for uploads
+  const rateLimitCheck = checkRateLimit(`upload_${apiKey}`, 100); // 100 uploads per minute
+  if (!rateLimitCheck.allowed) {
+    return res.status(429).json({ error: 'Rate limit exceeded', message: rateLimitCheck.message });
+  }
+  
+  try {
+    const data = req.body;
+    
+    if (!Array.isArray(data)) {
+      return res.status(400).json({ error: 'Invalid data format', message: 'Expected array of AIS messages' });
+    }
+    
+    let processed = 0;
+    let errors = 0;
+    
+    // Update client status
+    clientStatusCache.set(clientId, {
+      lastSeen: new Date(),
+      totalMessages: (clientStatusCache.get(clientId)?.totalMessages || 0) + data.length,
+      lastMessageCount: data.length,
+      apiKey: apiKey
+    });
+    
+    for (const message of data) {
+      try {
+        // Convert jsonais format to AISStream-like format
+        const aisMessage = convertJsonaisToAIS(message);
+        if (aisMessage) {
+          processAISMessage(aisMessage);
+          processed++;
+        } else {
+          errors++;
+        }
+      } catch (error) {
+        console.warn(`Error processing uploaded AIS message:`, sanitizeLogInput(String(error.message)));
+        errors++;
+      }
+    }
+    
+    res.json({
+      success: true,
+      processed,
+      errors,
+      total: data.length,
+      clientId,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('AIS upload error:', sanitizeLogInput(String(error.message)));
+    res.status(500).json({
+      error: 'Processing failed',
+      message: 'Internal server error',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Convert jsonais format to AISStream-compatible format
+function convertJsonaisToAIS(jsonaisMessage) {
+  try {
+    // jsonais format: { "mmsi": 123456789, "lat": -36.123, "lon": 174.456, "cog": 123, "sog": 5.2, "timestamp": 1234567890 }
+    if (!jsonaisMessage.mmsi || !jsonaisMessage.lat || !jsonaisMessage.lon) {
+      return null;
+    }
+    
+    const mmsi = parseInt(jsonaisMessage.mmsi);
+    if (mmsi < 100000000 || mmsi > 999999999) {
+      return null;
+    }
+    
+    // Convert to AISStream format
+    const timestamp = jsonaisMessage.timestamp ? 
+      new Date(jsonaisMessage.timestamp * 1000).toISOString() : 
+      new Date().toISOString();
+    
+    return {
+      MetaData: {
+        MMSI: mmsi,
+        latitude: parseFloat(jsonaisMessage.lat),
+        longitude: parseFloat(jsonaisMessage.lon),
+        time_utc: timestamp
+      },
+      MessageType: 'PositionReport', // Assume Class A position report
+      Message: {
+        PositionReport: {
+          Cog: jsonaisMessage.cog !== undefined ? parseFloat(jsonaisMessage.cog) : null,
+          Sog: jsonaisMessage.sog !== undefined ? parseFloat(jsonaisMessage.sog) : null,
+          TrueHeading: jsonaisMessage.heading !== undefined ? parseInt(jsonaisMessage.heading) : null,
+          NavigationalStatus: jsonaisMessage.navstat !== undefined ? parseInt(jsonaisMessage.navstat) : null,
+          RateOfTurn: jsonaisMessage.rot !== undefined ? parseFloat(jsonaisMessage.rot) : null,
+          PositionAccuracy: jsonaisMessage.accuracy !== undefined ? Boolean(jsonaisMessage.accuracy) : null,
+          Timestamp: jsonaisMessage.timestamp !== undefined ? parseInt(jsonaisMessage.timestamp) : null,
+          Valid: true
+        }
+      }
+    };
+  } catch (error) {
+    console.warn('Error converting jsonais message:', sanitizeLogInput(String(error.message)));
+    return null;
+  }
+}
+
+// Client status endpoint
+app.get('/ais-proxy/status', async (req, res) => {
+  const { username } = req.query;
+  
+  // Validate user API key
+  const keyValidation = await validateUserApiKey(username);
+  if (!keyValidation.valid) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  const now = new Date();
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  const activeClients = [];
+  
+  for (const [clientId, status] of clientStatusCache.entries()) {
+    if (status.lastSeen > last24h) {
+      activeClients.push({
+        clientId,
+        lastSeen: status.lastSeen.toISOString(),
+        totalMessages: status.totalMessages,
+        lastMessageCount: status.lastMessageCount,
+        hoursAgo: Math.round((now - status.lastSeen) / (1000 * 60 * 60) * 10) / 10
+      });
+    }
+  }
+  
+  // Sort by most recent
+  activeClients.sort((a, b) => new Date(b.lastSeen) - new Date(a.lastSeen));
+  
+  res.json({
+    activeClients,
+    totalActiveClients: activeClients.length,
+    timeWindow: '24 hours',
+    timestamp: now.toISOString()
+  });
+});
+
+// Clean up old client status entries
+setInterval(() => {
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48 hours
+  let removed = 0;
+  
+  for (const [clientId, status] of clientStatusCache.entries()) {
+    if (status.lastSeen < cutoff) {
+      clientStatusCache.delete(clientId);
+      removed++;
+    }
+  }
+  
+  if (removed > 0 && DEBUG) {
+    console.log(`Cleaned up ${removed} old client status entries`);
+  }
+}, 3600000); // Every hour
+
 // Enhanced v2 health endpoint
 app.get('/ais-proxy/v2/health', async (req, res) => {
   try {
@@ -1555,6 +1733,11 @@ app.get('/ais-proxy/v2/health', async (req, res) => {
       lookupQueue: {
         nameLookupQueue: nameLookupQueue.length,
         nameLookupInProgress
+      },
+      uploadClients: {
+        totalClients: clientStatusCache.size,
+        activeClients24h: Array.from(clientStatusCache.values())
+          .filter(status => status.lastSeen > new Date(Date.now() - 24 * 60 * 60 * 1000)).length
       },
       vesselFinderApi: {
         circuitBreakerState,
