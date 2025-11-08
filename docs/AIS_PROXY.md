@@ -240,7 +240,7 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 - **Filtering**: Navigation aids are automatically filtered out to maintain AISHub compatibility
 - **Name Lookup**: Class B vessel names enhanced via VesselFinder API when not available from AIS
 - **Class B Static Data**: Processes AIS Message Type 24 for Class B vessel names and types
-- **Ferry Data**: Auckland Transport ferry positions polled every 30 seconds
+- **Ferry Data**: Auckland Transport ferry positions polled every 60 seconds
 
 ## Data Fields
 

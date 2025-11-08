@@ -30,7 +30,7 @@ const RATE_LIMIT_PER_MINUTE = 600;
 const NAME_LOOKUP_DELAY = 5000; // 5 seconds between lookups (more conservative due to rate limiting)
 const MAX_LOOKUP_RETRIES = 3;
 const LOOKUP_BACKOFF_MULTIPLIER = 2;
-const AT_FERRY_POLL_INTERVAL = 15000; // 15 seconds
+const AT_FERRY_POLL_INTERVAL = 60000; // 60 seconds (1 minute)
 
 // Circuit breaker for VesselFinder API
 let circuitBreakerState = 'CLOSED'; // CLOSED, OPEN, HALF_OPEN
@@ -191,7 +191,7 @@ function processATFerryData(ferries) {
         _lookupTypeText: null
       };
       
-      // Always use AT ferry position data (polled every 30s, more current)
+      // Always use AT ferry position data (polled every 60s, more current)
       vessel.TIME = new Date(ferry.timestamp).toISOString().replace('T', ' ').replace('Z', ' UTC');
       vessel.LONGITUDE = ferry.lng;
       vessel.LATITUDE = ferry.lat;
