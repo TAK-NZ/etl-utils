@@ -1529,9 +1529,8 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
   try {
     const data = req.body;
     
-    if (!Array.isArray(data)) {
-      return res.status(400).json({ error: 'Invalid data format', message: 'Expected array of AIS messages' });
-    }
+    // Handle both array format and single object format
+    const messages = Array.isArray(data) ? data : [data];
     
     let processed = 0;
     let errors = 0;
@@ -1539,12 +1538,12 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
     // Update client status
     clientStatusCache.set(clientId, {
       lastSeen: new Date(),
-      totalMessages: (clientStatusCache.get(clientId)?.totalMessages || 0) + data.length,
-      lastMessageCount: data.length,
+      totalMessages: (clientStatusCache.get(clientId)?.totalMessages || 0) + messages.length,
+      lastMessageCount: messages.length,
       apiKey: apiKey
     });
     
-    for (const message of data) {
+    for (const message of messages) {
       try {
         // Convert jsonais format to AISStream-like format
         const aisMessage = convertJsonaisToAIS(message);
@@ -1564,7 +1563,7 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
       success: true,
       processed,
       errors,
-      total: data.length,
+      total: messages.length,
       clientId,
       timestamp: new Date().toISOString()
     });
@@ -1582,46 +1581,85 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
 // Convert jsonais format to AISStream-compatible format
 function convertJsonaisToAIS(jsonaisMessage) {
   try {
-    // jsonais format: { "mmsi": 123456789, "lat": -36.123, "lon": 174.456, "cog": 123, "sog": 5.2, "timestamp": 1234567890 }
-    if (!jsonaisMessage.mmsi || !jsonaisMessage.lat || !jsonaisMessage.lon) {
-      return null;
+    // Handle simple format: { "mmsi": 123456789, "lat": -36.123, "lon": 174.456, ... }
+    if (jsonaisMessage.mmsi && jsonaisMessage.lat !== undefined && jsonaisMessage.lon !== undefined) {
+      return convertSimpleJsonais(jsonaisMessage);
     }
     
-    const mmsi = parseInt(jsonaisMessage.mmsi);
-    if (mmsi < 100000000 || mmsi > 999999999) {
-      return null;
-    }
-    
-    // Convert to AISStream format
-    const timestamp = jsonaisMessage.timestamp ? 
-      new Date(jsonaisMessage.timestamp * 1000).toISOString() : 
-      new Date().toISOString();
-    
-    return {
-      MetaData: {
-        MMSI: mmsi,
-        latitude: parseFloat(jsonaisMessage.lat),
-        longitude: parseFloat(jsonaisMessage.lon),
-        time_utc: timestamp
-      },
-      MessageType: 'PositionReport', // Assume Class A position report
-      Message: {
-        PositionReport: {
-          Cog: jsonaisMessage.cog !== undefined ? parseFloat(jsonaisMessage.cog) : null,
-          Sog: jsonaisMessage.sog !== undefined ? parseFloat(jsonaisMessage.sog) : null,
-          TrueHeading: jsonaisMessage.heading !== undefined ? parseInt(jsonaisMessage.heading) : null,
-          NavigationalStatus: jsonaisMessage.navstat !== undefined ? parseInt(jsonaisMessage.navstat) : null,
-          RateOfTurn: jsonaisMessage.rot !== undefined ? parseFloat(jsonaisMessage.rot) : null,
-          PositionAccuracy: jsonaisMessage.accuracy !== undefined ? Boolean(jsonaisMessage.accuracy) : null,
-          Timestamp: jsonaisMessage.timestamp !== undefined ? parseInt(jsonaisMessage.timestamp) : null,
-          Valid: true
+    // Handle full JSONAIS protocol format with groups/msgs structure
+    if (jsonaisMessage.groups && Array.isArray(jsonaisMessage.groups)) {
+      for (const group of jsonaisMessage.groups) {
+        if (group.msgs && Array.isArray(group.msgs)) {
+          for (const msg of group.msgs) {
+            // Convert full format to simple format
+            const simpleMsg = {
+              mmsi: msg.mmsi,
+              lat: msg.lat,
+              lon: msg.lon,
+              cog: msg.course,
+              sog: msg.speed,
+              heading: msg.heading,
+              navstat: msg.status,
+              timestamp: msg.rxtime ? parseJsonaisTime(msg.rxtime) : undefined
+            };
+            return convertSimpleJsonais(simpleMsg);
+          }
         }
       }
-    };
+    }
+    
+    return null;
   } catch (error) {
     console.warn('Error converting jsonais message:', sanitizeLogInput(String(error.message)));
     return null;
   }
+}
+
+// Convert simple jsonais format
+function convertSimpleJsonais(msg) {
+  if (!msg.mmsi || msg.lat === undefined || msg.lon === undefined) {
+    return null;
+  }
+  
+  const mmsi = parseInt(msg.mmsi);
+  if (mmsi < 100000000 || mmsi > 999999999) {
+    return null;
+  }
+  
+  const timestamp = msg.timestamp ? 
+    new Date(msg.timestamp * 1000).toISOString() : 
+    new Date().toISOString();
+  
+  return {
+    MetaData: {
+      MMSI: mmsi,
+      latitude: parseFloat(msg.lat),
+      longitude: parseFloat(msg.lon),
+      time_utc: timestamp
+    },
+    MessageType: 'PositionReport',
+    Message: {
+      PositionReport: {
+        Cog: msg.cog !== undefined ? parseFloat(msg.cog) : null,
+        Sog: msg.sog !== undefined ? parseFloat(msg.sog) : null,
+        TrueHeading: msg.heading !== undefined ? parseInt(msg.heading) : null,
+        NavigationalStatus: msg.navstat !== undefined ? parseInt(msg.navstat) : null,
+        Valid: true
+      }
+    }
+  };
+}
+
+// Parse JSONAIS time format (YYYYMMDDHHMMSS)
+function parseJsonaisTime(timeStr) {
+  if (!timeStr || timeStr.length !== 14) return undefined;
+  const year = timeStr.substr(0, 4);
+  const month = timeStr.substr(4, 2);
+  const day = timeStr.substr(6, 2);
+  const hour = timeStr.substr(8, 2);
+  const minute = timeStr.substr(10, 2);
+  const second = timeStr.substr(12, 2);
+  return Math.floor(new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`).getTime() / 1000);
 }
 
 // Client status endpoint
