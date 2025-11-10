@@ -61,13 +61,60 @@ https://utils.tak.nz/ais-proxy/ws.php?username=your-api-key&latmin=-48&latmax=-3
 POST /ais-proxy/jsonais/{api_key}
 ```
 
-Upload AIS data from AIS receivers using the jsonais format (compatible with aprs.fi).
+Upload AIS data from AIS receivers. Supports multiple formats including AIS-catcher HTTP output modes and JSONAIS protocol.
 
 **Parameters:**
 - `api_key` - Your API key embedded in the URL path
 
-**Request Body:**
-JSONAIS protocol format (aprs.fi compatible):
+**Supported Formats:**
+
+**1. AIS-catcher AISCATCHER format (msgs array):**
+```json
+{
+  "msgs": [
+    {
+      "mmsi": 123456789,
+      "lat": -36.8485,
+      "lon": 174.7633,
+      "course": 45.2,
+      "speed": 12.5,
+      "heading": 47,
+      "status": 0,
+      "rxtime": "20241108221500"
+    }
+  ]
+}
+```
+
+**2. AIS-catcher MINIMAL format:**
+```json
+{
+  "mmsi": 123456789,
+  "lat": -36.8485,
+  "lon": 174.7633,
+  "course": 45.2,
+  "speed": 12.5,
+  "heading": 47,
+  "status": 0,
+  "rxtime": "20241108221500"
+}
+```
+
+**3. AIS-catcher APRS format:**
+```json
+{
+  "call": "123456789",
+  "lat": -36.8485,
+  "lng": 174.7633,
+  "course": 45.2,
+  "speed": 12.5,
+  "heading": 47,
+  "status": 0,
+  "time": "2024-11-08T22:15:00Z"
+}
+```
+
+**4. JSONAIS protocol format (for other software compatibility):**
 ```json
 {
   "protocol": "jsonais",
