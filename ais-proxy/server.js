@@ -1552,13 +1552,15 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
         // Convert jsonais format to AISStream-like format
         const aisMessage = convertJsonaisToAIS(message);
         if (aisMessage) {
+          console.log(`📡 JSONAIS upload from ${clientId}: MMSI ${aisMessage.MetaData.MMSI}, pos ${aisMessage.MetaData.latitude},${aisMessage.MetaData.longitude}`);
           processAISMessage(aisMessage);
           processed++;
         } else {
+          console.warn(`❌ JSONAIS conversion failed for client ${clientId}:`, JSON.stringify(message).substring(0, 200));
           errors++;
         }
       } catch (error) {
-        console.warn(`Error processing uploaded AIS message:`, sanitizeLogInput(String(error.message)));
+        console.warn(`❌ Error processing uploaded AIS message from ${clientId}:`, sanitizeLogInput(String(error.message)));
         errors++;
       }
     }
@@ -1585,7 +1587,73 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
 // Convert JSONAIS protocol format to AISStream-compatible format
 function convertJsonaisToAIS(jsonaisMessage) {
   try {
-    // Only handle full JSONAIS protocol format with groups/msgs structure
+    // Handle AIS-catcher format with top-level msgs array
+    if (jsonaisMessage.msgs && Array.isArray(jsonaisMessage.msgs)) {
+      for (const msg of jsonaisMessage.msgs) {
+        if (!msg.mmsi || msg.lat === undefined || msg.lon === undefined) {
+          continue;
+        }
+        
+        const mmsi = parseInt(msg.mmsi);
+        if (mmsi < 100000000 || mmsi > 999999999) {
+          continue;
+        }
+        
+        const timestamp = msg.rxtime ? 
+          parseJsonaisTime(msg.rxtime) : 
+          Math.floor(Date.now() / 1000);
+        
+        return {
+          MetaData: {
+            MMSI: mmsi,
+            latitude: parseFloat(msg.lat),
+            longitude: parseFloat(msg.lon),
+            time_utc: new Date(timestamp * 1000).toISOString()
+          },
+          MessageType: 'PositionReport',
+          Message: {
+            PositionReport: {
+              Cog: msg.course !== undefined ? parseFloat(msg.course) : null,
+              Sog: msg.speed !== undefined ? parseFloat(msg.speed) : null,
+              TrueHeading: msg.heading !== undefined ? parseInt(msg.heading) : null,
+              NavigationalStatus: msg.status !== undefined ? parseInt(msg.status) : null,
+              Valid: true
+            }
+          }
+        };
+      }
+    }
+    
+    // Handle AIS-catcher Minimal format (direct message object)
+    if (jsonaisMessage.mmsi && jsonaisMessage.lat !== undefined && jsonaisMessage.lon !== undefined) {
+      const mmsi = parseInt(jsonaisMessage.mmsi);
+      if (mmsi >= 100000000 && mmsi <= 999999999) {
+        const timestamp = jsonaisMessage.rxtime ? 
+          parseJsonaisTime(jsonaisMessage.rxtime) : 
+          Math.floor(Date.now() / 1000);
+        
+        return {
+          MetaData: {
+            MMSI: mmsi,
+            latitude: parseFloat(jsonaisMessage.lat),
+            longitude: parseFloat(jsonaisMessage.lon),
+            time_utc: new Date(timestamp * 1000).toISOString()
+          },
+          MessageType: 'PositionReport',
+          Message: {
+            PositionReport: {
+              Cog: jsonaisMessage.course !== undefined ? parseFloat(jsonaisMessage.course) : null,
+              Sog: jsonaisMessage.speed !== undefined ? parseFloat(jsonaisMessage.speed) : null,
+              TrueHeading: jsonaisMessage.heading !== undefined ? parseInt(jsonaisMessage.heading) : null,
+              NavigationalStatus: jsonaisMessage.status !== undefined ? parseInt(jsonaisMessage.status) : null,
+              Valid: true
+            }
+          }
+        };
+      }
+    }
+    
+    // Handle full JSONAIS protocol format with groups/msgs structure
     if (jsonaisMessage.groups && Array.isArray(jsonaisMessage.groups)) {
       for (const group of jsonaisMessage.groups) {
         if (group.msgs && Array.isArray(group.msgs)) {
@@ -1623,6 +1691,78 @@ function convertJsonaisToAIS(jsonaisMessage) {
             };
           }
         }
+      }
+    }
+    
+    // Handle AIS-catcher APRS format
+    if (jsonaisMessage.call && jsonaisMessage.lat !== undefined && jsonaisMessage.lng !== undefined) {
+      // Extract MMSI from call sign if it follows APRS format (e.g., "123456789")
+      const mmsi = parseInt(jsonaisMessage.call);
+      if (mmsi >= 100000000 && mmsi <= 999999999) {
+        const timestamp = jsonaisMessage.time ? 
+          Math.floor(new Date(jsonaisMessage.time).getTime() / 1000) : 
+          Math.floor(Date.now() / 1000);
+        
+        return {
+          MetaData: {
+            MMSI: mmsi,
+            latitude: parseFloat(jsonaisMessage.lat),
+            longitude: parseFloat(jsonaisMessage.lng),
+            time_utc: new Date(timestamp * 1000).toISOString()
+          },
+          MessageType: 'PositionReport',
+          Message: {
+            PositionReport: {
+              Cog: jsonaisMessage.course !== undefined ? parseFloat(jsonaisMessage.course) : null,
+              Sog: jsonaisMessage.speed !== undefined ? parseFloat(jsonaisMessage.speed) : null,
+              TrueHeading: jsonaisMessage.heading !== undefined ? parseInt(jsonaisMessage.heading) : null,
+              NavigationalStatus: jsonaisMessage.status !== undefined ? parseInt(jsonaisMessage.status) : null,
+              Valid: true
+            }
+          }
+        };
+      }
+    }
+    
+    // Handle direct message format (like aprs.fi might accept)
+    if (jsonaisMessage.mmsi || jsonaisMessage.MMSI) {
+      const mmsi = parseInt(jsonaisMessage.mmsi || jsonaisMessage.MMSI);
+      const lat = parseFloat(jsonaisMessage.lat || jsonaisMessage.latitude);
+      const lon = parseFloat(jsonaisMessage.lon || jsonaisMessage.lng || jsonaisMessage.longitude);
+      
+      if (mmsi >= 100000000 && mmsi <= 999999999 && 
+          lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+        
+        const timestamp = jsonaisMessage.rxtime ? 
+          parseJsonaisTime(jsonaisMessage.rxtime) : 
+          Math.floor(Date.now() / 1000);
+        
+        return {
+          MetaData: {
+            MMSI: mmsi,
+            latitude: lat,
+            longitude: lon,
+            time_utc: new Date(timestamp * 1000).toISOString()
+          },
+          MessageType: 'PositionReport',
+          Message: {
+            PositionReport: {
+              Cog: jsonaisMessage.course !== undefined ? parseFloat(jsonaisMessage.course) : null,
+              Sog: jsonaisMessage.speed !== undefined ? parseFloat(jsonaisMessage.speed) : null,
+              TrueHeading: jsonaisMessage.heading !== undefined ? parseInt(jsonaisMessage.heading) : null,
+              NavigationalStatus: jsonaisMessage.status !== undefined ? parseInt(jsonaisMessage.status) : null,
+              Valid: true
+            }
+          }
+        };
+      }
+    }
+    
+    // Handle array of messages
+    if (Array.isArray(jsonaisMessage)) {
+      for (const msg of jsonaisMessage) {
+        const result = convertJsonaisToAIS(msg);
+        if (result) return result; // Return first valid message
       }
     }
     
