@@ -151,6 +151,11 @@ export class Alb extends Construct {
     this.loadBalancer.setAttribute('access_logs.s3.enabled', 'true');
     this.loadBalancer.setAttribute('access_logs.s3.bucket', logsBucket.bucketName);
     this.loadBalancer.setAttribute('access_logs.s3.prefix', `TAK-${contextConfig.stackName}-EtlUtils`);
+    
+    // Configure ALB for larger request bodies (AIS uploads)
+    this.loadBalancer.setAttribute('routing.http2.enabled', 'true');
+    this.loadBalancer.setAttribute('idle_timeout.timeout_seconds', '60');
+    this.loadBalancer.setAttribute('connection_logs.s3.enabled', 'false');
 
     // Create Route53 record
     new route53.ARecord(this, 'UtilsARecord', {

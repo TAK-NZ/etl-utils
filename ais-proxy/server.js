@@ -5,7 +5,20 @@ import path from 'path';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ 
+  limit: '50mb',
+  verify: (req, res, buf, encoding) => {
+    // Store raw body for debugging truncated requests
+    req.rawBody = buf;
+  }
+}));
+
+// Add request timeout middleware
+app.use((req, res, next) => {
+  req.setTimeout(30000); // 30 second timeout
+  res.setTimeout(30000);
+  next();
+});
 const PORT = process.env.PORT || 3000;
 const CONFIG_BUCKET = process.env.CONFIG_BUCKET;
 const CONFIG_KEY = process.env.CONFIG_KEY || 'ETL-Util-AIS-Proxy-Api-Keys.json';
@@ -1529,6 +1542,14 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
   try {
     const data = req.body;
     
+    // Validate request body exists and is not empty
+    if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
+      console.warn(`❌ Empty or invalid request body from client ${clientId}`);
+      return res.status(400).json({ error: 'Empty request body' });
+    }
+    
+
+    
     // Only accept JSONAIS protocol format (single object)
     if (Array.isArray(data)) {
       return res.status(400).json({ error: 'Invalid format', message: 'Expected JSONAIS protocol object, not array' });
@@ -1549,15 +1570,16 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
     
     for (const message of messages) {
       try {
+        // Diagnostic: log message structure
+        const msgStr = JSON.stringify(message);
+        console.log(`🔍 Message from ${clientId}: size=${msgStr.length}, hasProtocol=${!!message.protocol}, hasMsgs=${!!message.msgs}, msgsLength=${message.msgs?.length || 0}`);
+        
         // Convert jsonais format to AISStream-like format
         const aisMessage = convertJsonaisToAIS(message);
         if (aisMessage) {
           console.log(`📡 JSONAIS upload from ${clientId}: MMSI ${aisMessage.MetaData.MMSI}, pos ${aisMessage.MetaData.latitude},${aisMessage.MetaData.longitude}`);
           processAISMessage(aisMessage);
           processed++;
-        } else {
-          console.warn(`❌ JSONAIS conversion failed for client ${clientId}:`, JSON.stringify(message).substring(0, 200));
-          errors++;
         }
       } catch (error) {
         console.warn(`❌ Error processing uploaded AIS message from ${clientId}:`, sanitizeLogInput(String(error.message)));
@@ -1575,6 +1597,47 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
     });
     
   } catch (error) {
+    // Check if error is due to malformed JSON
+    if (error instanceof SyntaxError && error.message.includes('JSON')) {
+      console.error(`❌ JSON parsing error from client ${clientId}:`, sanitizeLogInput(String(error.message)));
+      if (req.rawBody) {
+        console.error(`Raw body length: ${req.rawBody.length}, first 200 chars:`, sanitizeLogInput(req.rawBody.toString().substring(0, 200)));
+        
+        // Attempt to recover data from truncated JSON
+        const recoveredData = attemptJsonRecovery(req.rawBody);
+        if (recoveredData) {
+          console.log(`🔄 Attempting to recover data from truncated JSON for client ${clientId}`);
+          try {
+            let processed = 0;
+            for (const message of recoveredData.msgs || []) {
+              const aisMessage = convertJsonaisToAIS({ msgs: [message] });
+              if (aisMessage) {
+                console.log(`📡 Recovered JSONAIS upload from ${clientId}: MMSI ${aisMessage.MetaData.MMSI}`);
+                processAISMessage(aisMessage);
+                processed++;
+              }
+            }
+            if (processed > 0) {
+              return res.json({
+                success: true,
+                processed,
+                recovered: true,
+                message: 'Recovered data from truncated JSON',
+                timestamp: new Date().toISOString()
+              });
+            }
+          } catch (recoveryError) {
+            console.warn(`Failed to recover from truncated JSON: ${sanitizeLogInput(String(recoveryError.message))}`);
+          }
+        }
+      }
+      return res.status(400).json({
+        error: 'Invalid JSON',
+        message: 'Request body contains malformed JSON - possibly truncated',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     console.error('AIS upload error:', sanitizeLogInput(String(error.message)));
     res.status(500).json({
       error: 'Processing failed',
@@ -1587,8 +1650,34 @@ app.post('/ais-proxy/jsonais/:apiKey', async (req, res) => {
 // Convert JSONAIS protocol format to AISStream-compatible format
 function convertJsonaisToAIS(jsonaisMessage) {
   try {
+    // Handle truncated AIS-catcher messages (common pattern: cut off at "setting":"N/A)
+    if (typeof jsonaisMessage === 'string') {
+      // Try to parse truncated JSON string
+      try {
+        jsonaisMessage = JSON.parse(jsonaisMessage);
+      } catch (e) {
+        // If parsing fails, try to extract msgs from the string
+        const msgsMatch = jsonaisMessage.match(/"msgs":\s*\[(.*?)\]/s);
+        if (msgsMatch) {
+          try {
+            const msgs = JSON.parse(`[${msgsMatch[1]}]`);
+            jsonaisMessage = { msgs };
+          } catch (e2) {
+            return null;
+          }
+        } else {
+          return null;
+        }
+      }
+    }
+    
     // Handle AIS-catcher format with top-level msgs array
     if (jsonaisMessage.msgs && Array.isArray(jsonaisMessage.msgs)) {
+      if (jsonaisMessage.msgs.length === 0) {
+        // Empty msgs array - this is normal for AIS-catcher when no messages received
+        return null;
+      }
+      
       for (const msg of jsonaisMessage.msgs) {
         if (!msg.mmsi || msg.lat === undefined || msg.lon === undefined) {
           continue;
@@ -1622,6 +1711,12 @@ function convertJsonaisToAIS(jsonaisMessage) {
           }
         };
       }
+    }
+    
+    // Handle AIS-catcher format that might be missing msgs array due to truncation
+    if (jsonaisMessage.protocol === 'jsonaiscatcher' && !jsonaisMessage.msgs) {
+      // This is likely a truncated message or one with no AIS data
+      return null;
     }
     
     // Handle AIS-catcher Minimal format (direct message object)
@@ -1783,6 +1878,38 @@ function parseJsonaisTime(timeStr) {
   const minute = timeStr.substr(10, 2);
   const second = timeStr.substr(12, 2);
   return Math.floor(new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`).getTime() / 1000);
+}
+
+// Validate JSONAIS structure - be permissive like aprs.fi
+function validateJsonaisStructure(data) {
+  if (!data || typeof data !== 'object') return false;
+  
+  // Accept any object that has potential AIS data
+  // Don't validate structure completeness - let convertJsonaisToAIS handle it
+  return true;
+}
+
+// Attempt to recover from truncated JSON by trying to parse what we have
+function attemptJsonRecovery(rawBody) {
+  if (!rawBody) return null;
+  
+  const bodyStr = rawBody.toString();
+  
+  // Look for the msgs array in truncated JSON
+  const msgsMatch = bodyStr.match(/"msgs":\s*\[(.*?)\]/s);
+  if (msgsMatch) {
+    try {
+      const msgsStr = `[${msgsMatch[1]}]`;
+      const msgs = JSON.parse(msgsStr);
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        return { msgs };
+      }
+    } catch (e) {
+      // Failed to parse msgs array
+    }
+  }
+  
+  return null;
 }
 
 // Client status endpoint
