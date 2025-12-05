@@ -230,11 +230,7 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
       "enabled": false
     }
   },
-  "aucklandTransport": {
-    "key": "your-at-api-key-here",
-    "comment": "Auckland Transport API key for ferry positions",
-    "enabled": true
-  },
+
   "users": {
     "primary": {
       "key": "user-api-key-1",
@@ -265,7 +261,6 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 
 **Key Features:**
 - **AISStream Keys**: Primary/backup keys for connecting to AISStream service
-- **Auckland Transport Key**: API key for ferry position data
 - **User Keys**: Individual API keys for service users with custom rate limits
 - **Per-Key Rate Limits**: Individual rate limits for each user API key
 - **Enable/Disable**: Control key usage without removing from file
@@ -277,7 +272,6 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 
 - **Data Sources**: 
   - Real-time AIS data from AISStream WebSocket
-  - Auckland Transport ferry positions via REST API
 - **Coverage**: New Zealand waters (configurable bounding box)
 - **Caching**: Vessel data cached in memory with 1-hour expiration
 - **Persistence**: Cache persisted to disk for service restarts
@@ -287,7 +281,6 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 - **Filtering**: Navigation aids are automatically filtered out to maintain AISHub compatibility
 - **Name Lookup**: Class B vessel names enhanced via VesselFinder API when not available from AIS
 - **Class B Static Data**: Processes AIS Message Type 24 for Class B vessel names and types
-- **Ferry Data**: Auckland Transport ferry positions polled every 60 seconds
 
 ## Data Fields
 
