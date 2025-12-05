@@ -13,6 +13,14 @@ export interface MBTilesConfig {
 }
 
 /**
+ * Multiple MBTiles configuration for tileserver-gl
+ */
+export interface MBTilesMultiConfig {
+  enabled: boolean;
+  files: MBTilesConfig[];
+}
+
+/**
  * Container configuration for individual services
  */
 export interface ContainerConfig {
@@ -26,6 +34,7 @@ export interface ContainerConfig {
   priority?: number;
   imageTag: string;
   mbtiles?: MBTilesConfig;
+  mbtilesMulti?: MBTilesMultiConfig;
 }
 
 /**

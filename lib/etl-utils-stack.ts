@@ -314,7 +314,7 @@ export class EtlUtilsStack extends cdk.Stack {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-TileServer-GL-Api-Keys.json';
         // Add S3 bucket for MBTiles if enabled
-        if (containerConfig.mbtiles?.enabled) {
+        if (containerConfig.mbtiles?.enabled || containerConfig.mbtilesMulti?.enabled) {
           const artifactsBucketName = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ARTIFACTS_BUCKET));
           environmentVariables.S3_BUCKET = cdk.Token.asString(artifactsBucketName);
         }

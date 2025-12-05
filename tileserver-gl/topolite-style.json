@@ -13,7 +13,7 @@
     "LINZ Basemaps": {
       "attribution": "© 2022 Toitū Te Whenua - CC BY 4.0",
       "type": "vector",
-      "url": "https://basemaps.linz.govt.nz/v1/tiles/topolite-v2/EPSG:3857/tile.json?api=PLACEHOLDER_API_KEY"
+      "url": "mbtiles://./tiles/linz-vector-tiles.mbtiles"
     },
     "LINZ-Texture-Relief": {
       "maxzoom": 20,
