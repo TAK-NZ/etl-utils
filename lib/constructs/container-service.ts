@@ -152,7 +152,58 @@ export class ContainerService extends Construct {
 
     // Add init container for tileserver-gl MBTiles download
     let initContainer: ecs.ContainerDefinition | undefined;
-    if (containerName === 'tileserver-gl' && containerConfig.mbtiles?.enabled && efsAccessPoint) {
+    if (containerName === 'tileserver-gl' && efsAccessPoint && 
+        (containerConfig.mbtiles?.enabled || containerConfig.mbtilesMulti?.enabled)) {
+      
+      // Build download commands for all mbtiles files
+      let downloadCommands: string[] = [];
+      
+      // Handle single mbtiles config (backward compatibility)
+      if (containerConfig.mbtiles?.enabled) {
+        downloadCommands.push(`
+          TILE_PATH="/tiles/${containerConfig.mbtiles.filename}" && 
+          S3_PATH="s3://$S3_BUCKET/${containerConfig.mbtiles.s3Key}" && 
+          echo "Checking for tile file: $TILE_PATH" && 
+          if [ "$FORCE_DOWNLOAD" = "true" ] || [ ! -f "$TILE_PATH" ]; then 
+            if [ "$FORCE_DOWNLOAD" = "true" ] && [ -f "$TILE_PATH" ]; then 
+              echo "FORCE_DOWNLOAD=true - removing existing file" && 
+              rm "$TILE_PATH"; 
+            fi && 
+            echo "Downloading MBTiles from S3: $S3_PATH" && 
+            echo "Target path: $TILE_PATH" && 
+            aws s3 cp "$S3_PATH" "$TILE_PATH" --no-progress && 
+            echo "Download completed: $(ls -lh $TILE_PATH)" && 
+            echo "File size: $(du -h $TILE_PATH)"; 
+          else 
+            echo "Tile file already exists: $(ls -lh $TILE_PATH)"; 
+          fi`);
+      }
+      
+      // Handle multiple mbtiles config
+      if (containerConfig.mbtilesMulti?.enabled) {
+        containerConfig.mbtilesMulti.files.forEach(file => {
+          downloadCommands.push(`
+            TILE_PATH="/tiles/${file.filename}" && 
+            S3_PATH="s3://$S3_BUCKET/${file.s3Key}" && 
+            echo "Checking for tile file: $TILE_PATH" && 
+            if [ "$FORCE_DOWNLOAD" = "true" ] || [ ! -f "$TILE_PATH" ]; then 
+              if [ "$FORCE_DOWNLOAD" = "true" ] && [ -f "$TILE_PATH" ]; then 
+                echo "FORCE_DOWNLOAD=true - removing existing file" && 
+                rm "$TILE_PATH"; 
+              fi && 
+              echo "Downloading MBTiles from S3: $S3_PATH" && 
+              echo "Target path: $TILE_PATH" && 
+              aws s3 cp "$S3_PATH" "$TILE_PATH" --no-progress && 
+              echo "Download completed: $(ls -lh $TILE_PATH)" && 
+              echo "File size: $(du -h $TILE_PATH)"; 
+            else 
+              echo "Tile file already exists: $(ls -lh $TILE_PATH)"; 
+            fi`);
+        });
+      }
+      
+      const allDownloadCommands = downloadCommands.join(' && ');
+      
       initContainer = this.taskDefinition.addContainer('TileDownloader', {
         containerName: 'tile-downloader',
         image: ecs.ContainerImage.fromRegistry('alpine:latest'),
@@ -165,8 +216,6 @@ export class ContainerService extends Construct {
         }),
         environment: {
           S3_BUCKET: environmentVariables.S3_BUCKET || '',
-          S3_KEY: containerConfig.mbtiles.s3Key,
-          TILE_FILE: containerConfig.mbtiles.filename,
           AWS_DEFAULT_REGION: Stack.of(this).region,
           FORCE_DOWNLOAD: environmentVariables.FORCE_DOWNLOAD || 'false'
         },
@@ -177,25 +226,10 @@ export class ContainerService extends Construct {
            echo "Installing AWS CLI..." && 
            apk add --no-cache aws-cli curl && 
            echo "AWS CLI installed" && 
-           TILE_PATH="/tiles/$TILE_FILE" && 
-           S3_PATH="s3://$S3_BUCKET/$S3_KEY" && 
-           echo "Checking for tile file: $TILE_PATH" && 
            echo "Available memory: $(free -h)" && 
            echo "Available disk space: $(df -h /tiles)" && 
-           if [ "$FORCE_DOWNLOAD" = "true" ] || [ ! -f "$TILE_PATH" ]; then 
-             if [ "$FORCE_DOWNLOAD" = "true" ] && [ -f "$TILE_PATH" ]; then 
-               echo "FORCE_DOWNLOAD=true - removing existing file" && 
-               rm "$TILE_PATH"; 
-             fi && 
-             echo "Downloading MBTiles from S3: $S3_PATH" && 
-             echo "Target path: $TILE_PATH" && 
-             aws s3 cp "$S3_PATH" "$TILE_PATH" --no-progress && 
-             echo "Download completed: $(ls -lh $TILE_PATH)" && 
-             echo "File size: $(du -h $TILE_PATH)"; 
-           else 
-             echo "Tile file already exists: $(ls -lh $TILE_PATH)"; 
-           fi && 
-           echo "Tile preparation complete - container will exit successfully"`
+           ${allDownloadCommands} && 
+           echo "All tile preparation complete - container will exit successfully"`
         ]
       });
 
