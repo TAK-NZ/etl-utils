@@ -1,23 +1,22 @@
 #!/bin/bash
 
 # Build TAK Server Maps Package
-# Usage: ./build-maps-package.sh <domain> <api-key> [output-dir]
+# Usage: ./build-maps-package.sh <domain> <api-key> [output-dir] [uuid]
 
 set -e
 
 # Check arguments
 if [ $# -lt 2 ]; then
-    echo "Usage: $0 <domain> <api-key> [output-dir]"
+    echo "Usage: $0 <domain> <api-key> [output-dir] [uuid]"
     echo "Example: $0 example.com tk_abc123 ./output"
+    echo "Example with UUID: $0 example.com tk_abc123 ./output 12345678-1234-1234-1234-123456789abc"
     exit 1
 fi
 
 DOMAIN="$1"
 API_KEY="$2"
 OUTPUT_DIR="${3:-./output}"
-
-# Generate new UUID
-UUID=$(uuidgen)
+UUID="${4:-$(uuidgen)}"
 
 # Create output directory and get absolute paths
 mkdir -p "$OUTPUT_DIR"

@@ -1,0 +1,39 @@
+{
+  "version": 8,
+  "name": "LINZ Marine Charts",
+  "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>",
+  "sources": {
+    "linz-marine": {
+      "type": "raster",
+      "tiles": ["https://basemaps.linz.govt.nz/v1/tiles/charts/WebMercatorQuad/{z}/{x}/{y}.webp?api=PLACEHOLDER_API_KEY"],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 24,
+      "attribution": "© <a href='//www.linz.govt.nz/linz-copyright'>LINZ CC BY 4.0</a> © <a href='//www.linz.govt.nz/data/linz-data/linz-basemaps/data-attribution'>Imagery Basemap contributors</a>"
+    },
+    "relief-shade": {
+      "type": "raster",
+      "tiles": ["https://basemaps.linz.govt.nz/v1/tiles/texturereliefshade/EPSG:3857/{z}/{x}/{y}.webp?api=PLACEHOLDER_API_KEY"],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 18
+    }
+  },
+  "layers": [
+    {
+      "id": "linz-marine",
+      "type": "raster",
+      "source": "linz-marine"
+    },
+    {
+      "id": "relief-shade",
+      "type": "raster",
+      "source": "relief-shade",
+      "paint": {
+        "raster-opacity": 0.6
+      }
+    }
+  ],
+  "center": [174.7763921, -41.2865302],
+  "zoom": 12
+}
