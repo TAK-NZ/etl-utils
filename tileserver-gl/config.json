@@ -53,6 +53,17 @@
       "tilejson": {
         "format": "png"
       }
+    },
+    "linz-marine": {
+      "name": "LINZ Marine Charts",
+      "style": "linz-marine-style.json",
+      "serve_rendered": true,
+      "center": [174.7763921, -41.2865302],
+      "zoom": 12,
+      "bounds": [166.0, -48.0, 179.0, -34.0],
+      "tilejson": {
+        "format": "png"
+      }
     }
   }
 }
