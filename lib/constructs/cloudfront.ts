@@ -146,12 +146,15 @@ function handler(event) {
         return request;
     }
     
-    // Exclude specific files from authentication
+    // Exclude specific files from authentication (preview tiles for web interface)
     var excludedFiles = [
         '/styles/topolite/12/4036/2564.png',
+        '/styles/topolite/2/2/2.png',
         '/styles/linz-topo/12/4036/2564.png',
         '/styles/topographic/12/4036/2564.png',
-        '/styles/nationalmap/12/4036/2564.png'
+        '/styles/topographic/2/2/2.png',
+        '/styles/nationalmap/12/4036/2564.png',
+        '/styles/linz-marine/12/4036/2564.png'
     ];
     
     if (excludedFiles.indexOf(request.uri) !== -1) {
