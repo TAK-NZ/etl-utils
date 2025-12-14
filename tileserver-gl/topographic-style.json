@@ -11826,5 +11826,7 @@
     "horizon-fog-blend": 0.65,
     "sky-color": "#77b5fe",
     "sky-horizon-blend": 0.5
-  }
+  },
+  "center": [174.7763921, -41.2865302],
+  "zoom": 12
 }

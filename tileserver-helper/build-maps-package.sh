@@ -39,11 +39,12 @@ find "$TEMP_DIR" -name "*.xml" -type f -exec sed -i "s/{{UUID}}/$UUID/g" {} \;
 
 # Create zip file in temp directory then move to output
 cd "$TEMP_DIR"
-zip -r "TAK-NZ-Maps-Package.zip" ./*
+FILENAME="TAK-NZ-Maps-Package-$UUID.zip"
+zip -r "$FILENAME" ./*
 
 # Move to output directory
-OUTPUT_PATH="$OUTPUT_DIR/TAK-NZ-Maps-Package.zip"
-mv "TAK-NZ-Maps-Package.zip" "$OUTPUT_PATH"
+OUTPUT_PATH="$OUTPUT_DIR/$FILENAME"
+mv "$FILENAME" "$OUTPUT_PATH"
 
 # Verify file was created
 if [ -f "$OUTPUT_PATH" ]; then
