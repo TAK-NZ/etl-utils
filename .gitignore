@@ -75,5 +75,8 @@ jspm_packages/
 .DS_Store
 Thumbs.db
 
-# Generated TAK maps packages
+# Generated TAK packages
 TAK-NZ-Maps-Package*.zip
+
+# Generated GRG files
+grg-output/
