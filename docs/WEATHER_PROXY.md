@@ -23,10 +23,20 @@ GET /weather-radar/{z}/{x}/{y}.png
 - `size` - Tile size: `256` (default) or `512`
 - `smooth` - Smoothing: `0` (default, no smoothing) or `1` (smoothed)
 - `snow` - Snow overlay: `0` (default, no snow) or `1` (with snow)
+- `color` - Color scheme: `0-8` (default: `2`) - See [RainViewer Color Schemes](https://www.rainviewer.com/api/color-schemes.html)
+  - `0` - dBZ values with automatic MetService color mapping
+  - `1` - Original RainViewer
+  - `2` - Universal Blue (default)
+  - `3` - TITAN
+  - `4` - The Weather Channel
+  - `5` - Meteored
+  - `6` - NEXRAD Level-III
+  - `7` - RAINBOW @ SELEX-SI
+  - `8` - Dark Sky
 
 **Examples:**
 ```bash
-# Basic radar tile
+# Basic radar tile (Universal Blue color scheme)
 https://utils.tak.nz/weather-radar/5/10/15.png
 
 # High resolution with smoothing
@@ -35,8 +45,17 @@ https://utils.tak.nz/weather-radar/5/10/15.png?size=512&smooth=1
 # With snow overlay
 https://utils.tak.nz/weather-radar/5/10/15.png?snow=1
 
+# MetService colors (dBZ values with NZ-style colors)
+https://utils.tak.nz/weather-radar/5/10/15.png?color=0
+
+# Original RainViewer color scheme
+https://utils.tak.nz/weather-radar/5/10/15.png?color=1
+
+# NEXRAD Level-III color scheme
+https://utils.tak.nz/weather-radar/5/10/15.png?color=6
+
 # All options combined
-https://utils.tak.nz/weather-radar/5/10/15.png?size=512&smooth=1&snow=1
+https://utils.tak.nz/weather-radar/5/10/15.png?size=512&smooth=1&snow=1&color=0
 ```
 
 ### Health Check
@@ -58,7 +77,7 @@ Returns service status and cache statistics.
 ```json
 {
   "error": "Invalid parameter",
-  "message": "size parameter must be 256 or 512"
+  "message": "color parameter must be 0-8 (see RainViewer color schemes)"
 }
 ```
 
@@ -93,6 +112,26 @@ Returns service status and cache statistics.
   "message": "Weather service temporarily unavailable"
 }
 ```
+
+## Color Schemes
+
+The weather-proxy service supports multiple color schemes for radar visualization:
+
+### MetService Colors (color=0)
+When using `color=0`, the service automatically applies New Zealand MetService-style colors to dBZ radar data, providing a familiar look for New Zealand users. This color scheme maps raw dBZ values to the official MetService color palette used on their weather radar displays.
+
+### RainViewer Color Schemes (color=1-8)
+Other color schemes use RainViewer's standard palettes:
+- **1**: Original RainViewer colors
+- **2**: Universal Blue (default) - widely compatible
+- **3**: TITAN - high contrast for severe weather
+- **4**: The Weather Channel - familiar TV weather colors
+- **5**: Meteored - European weather service style
+- **6**: NEXRAD Level-III - US National Weather Service standard
+- **7**: RAINBOW @ SELEX-SI - radar manufacturer colors
+- **8**: Dark Sky - minimalist dark theme
+
+For detailed color specifications, see the [RainViewer Color Schemes documentation](https://www.rainviewer.com/api/color-schemes.html).
 
 ## Integration Notes
 
