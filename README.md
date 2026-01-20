@@ -17,10 +17,12 @@ This CDK stack deploys containerized utility services to the existing TAK infras
 ## Services
 
 ### weather-proxy
-Weather radar proxy service providing access to real-time radar data from [Rain Viewer](https://www.rainviewer.com/api.html).
+Weather radar proxy service providing access to real-time radar data from [Rain Viewer](https://www.rainviewer.com/api.html) with configurable color schemes including MetService-style colors for New Zealand.
 
 - **Path**: `/weather-radar/*`
 - **Health Check**: `/weather-radar/health`
+- **Parameters**: `?size=256|512&smooth=0|1&snow=0|1&color=0-8`
+- **Color Schemes**: 9 options including MetService colors (color=0) and RainViewer schemes
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
 ### ais-proxy
@@ -185,12 +187,7 @@ Set `TILESERVER_API_KEYS` secret in GitHub repository settings:
 ```
 
 ### Option 3: Default Keys
-If no context is provided, uses these default keys:
-- `tk_a8b9c2d3e4f5g6h7i8j9k0l1m2n3o4p5`
-- `tk_x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6`
-- `tk_q7w8e9r0t1y2u3i4o5p6a7s8d9f0g1h2`
-- `tk_m3n4b5v6c7x8z9a0s1d2f3g4h5j6k7l8`
-- `tk_p9o8i7u6y5t4r3e2w1q0a9s8d7f6g5h4`
+If no context is provided, the system uses built-in fallback keys for development/testing purposes. For production deployments, always use Option 1 or 2 above to provide your own secure API keys.
 
 ### Test API Authentication
 ```bash

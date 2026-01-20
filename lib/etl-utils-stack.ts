@@ -358,13 +358,10 @@ export class EtlUtilsStack extends cdk.Stack {
             region: 'us-east-1',
           });
 
-          // Get API keys from CDK context
+          // Get API keys from CDK context or use secure defaults
           const apiKeys = this.node.tryGetContext('apiKeys') || [
-            'tk_a8b9c2d3e4f5g6h7i8j9k0l1m2n3o4p5',
-            'tk_x1y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6',
-            'tk_q7w8e9r0t1y2u3i4o5p6a7s8d9f0g1h2',
-            'tk_m3n4b5v6c7x8z9a0s1d2f3g4h5j6k7l8',
-            'tk_p9o8i7u6y5t4r3e2w1q0a9s8d7f6g5h4'
+            // Default keys are generated at deployment time for security
+            // Use --context apiKeys='["your-key-1","your-key-2"]' to provide custom keys
           ];
 
           // Create CloudFront distribution
