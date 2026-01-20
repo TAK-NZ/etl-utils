@@ -6,12 +6,25 @@ import subprocess
 import boto3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from PIL import Image
+import io
+import signal
 
 # Configuration
-OUTPUT_FOLDER = "/tmp/radar"
-TILES_FOLDER = "/tmp/tiles"
 S3_BUCKET = os.environ.get('TILES_BUCKET')
 S3_PREFIX = "metservice-radar"
+
+# Optional single-region run: set `REGION` environment variable to run only that region.
+REGION_NAME = os.environ.get('REGION')
+BASE_OUTPUT_FOLDER = "/tmp/radar"
+BASE_TILES_FOLDER = "/tmp/tiles"
+
+if REGION_NAME:
+    OUTPUT_FOLDER = os.path.join(BASE_OUTPUT_FOLDER, REGION_NAME)
+    TILES_FOLDER = os.path.join(BASE_TILES_FOLDER, REGION_NAME)
+else:
+    OUTPUT_FOLDER = BASE_OUTPUT_FOLDER
+    TILES_FOLDER = BASE_TILES_FOLDER
 
 # Regions with GCPs
 REGIONS = {
@@ -72,24 +85,40 @@ def process_image(name, config):
         r.raise_for_status()
         img_array = np.asarray(bytearray(r.content), dtype=np.uint8)
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-        
+
         if img is None:
             # Try alternative decoding methods
             print(f"[{name}] Trying alternative decode methods...")
             img = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                # Pillow fallback (handles GIF and other formats)
+                try:
+                    pil_img = Image.open(io.BytesIO(r.content)).convert("RGBA")
+                    arr = np.array(pil_img)
+                    img = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
+                except Exception as e:
+                    print(f"[{name}] Pillow fallback failed: {e}")
+                    img = None
+
             if img is None:
                 print(f"[{name}] Failed to decode image with all methods")
                 return None
 
         print(f"[{name}] Image decoded: {img.shape}")
 
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # Ensure we have a BGR image for processing (convert BGRA->BGR if needed)
+        if img.ndim == 3 and img.shape[2] == 4:
+            bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        else:
+            bgr = img
+
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         
         # Blue mask (rain)
         mask_blue = cv2.inRange(hsv, np.array([85, 30, 30]), np.array([135, 255, 255]))
         
         # Warm mask (heavy rain)
-        mask_warm = np.zeros(img.shape[:2], dtype="uint8")
+        mask_warm = np.zeros(bgr.shape[:2], dtype="uint8")
         for rgb in WARM_COLORS:
             pixel = np.uint8([[[rgb[2], rgb[1], rgb[0]]]])
             hsv_p = cv2.cvtColor(pixel, cv2.COLOR_BGR2HSV)[0][0]
@@ -107,14 +136,14 @@ def process_image(name, config):
         final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, np.ones((2,2), np.uint8))
         
         # Clean borders
-        h, w = img.shape[:2]
+        h, w = bgr.shape[:2]
         final_mask[0:5, :] = 0
         final_mask[h-5:h, :] = 0
         final_mask[:, 0:5] = 0
         final_mask[:, w-5:w] = 0
 
         # Apply alpha
-        img_rgba = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
+        img_rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA)
         img_rgba[:, :, 3] = final_mask
         
         png_path = os.path.join(OUTPUT_FOLDER, f"{name}.png")
@@ -154,17 +183,28 @@ def process_region(name, config):
 def create_mosaic(vrt_files):
     print(f"Creating mosaic from {len(vrt_files)} regions...")
     output_tif = os.path.join(OUTPUT_FOLDER, "nz_mosaic.tif")
-    
-    cmd = ["gdalwarp", "-t_srs", "EPSG:3857", "-r", "bilinear", "-overwrite", "-co", "TILED=YES", "-co", "COMPRESS=DEFLATE"]
+    # Determine target resolution to match the maximum tile zoom level
+    try:
+        max_zoom = int(os.environ.get('MAX_ZOOM', '9'))
+    except Exception:
+        max_zoom = 9
+
+    # WebMercator initial resolution (meters/pixel) at zoom 0 for 256px tiles
+    WEBMERCATOR_RES_Z0 = 156543.03392804097
+    target_res = WEBMERCATOR_RES_Z0 / (2 ** max_zoom)
+
+    print(f"Creating mosaic target resolution for zoom {max_zoom}: {target_res} meters/pixel")
+
+    cmd = ["gdalwarp", "-t_srs", "EPSG:3857", "-r", "bilinear", "-overwrite", "-co", "TILED=YES", "-co", "COMPRESS=DEFLATE", "-tr", str(target_res), str(target_res)]
     cmd.extend(vrt_files)
     cmd.append(output_tif)
-    
+
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return output_tif
 
 def generate_tiles(mosaic_tif):
     print("Generating tiles...")
-    subprocess.run(["gdal2tiles.py", "-z", "6-10", "--processes=4", mosaic_tif, TILES_FOLDER], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["gdal2tiles.py", "-z", "0-9", "--processes=4", "--xyz", mosaic_tif, TILES_FOLDER], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def upload_tiles():
     print("Uploading tiles to S3...")
@@ -181,14 +221,40 @@ def main():
     if not S3_BUCKET:
         print("TILES_BUCKET environment variable not set")
         return
+    # Respect maximum run time to avoid runaway tasks
+    try:
+        max_run = int(os.environ.get('MAX_RUN_SECONDS', '1800'))
+    except Exception:
+        max_run = 1800
+
+    def _timeout_handler(signum, frame):
+        print(f"Max run time of {max_run}s reached, exiting")
+        raise SystemExit(2)
+
+    try:
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(max_run)
+    except Exception:
+        # signal.alarm may not be available on all platforms; ignore if unavailable
+        pass
         
     ensure_dir(OUTPUT_FOLDER)
     ensure_dir(TILES_FOLDER)
     
-    print(f"Processing {len(REGIONS)} regions in parallel...")
-    
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(process_region, name, config): name for name, config in REGIONS.items()}
+    # If REGION is set, run only that region
+    if REGION_NAME:
+        if REGION_NAME not in REGIONS:
+            print(f"Region {REGION_NAME} not found in supported regions")
+            return
+        regions_to_process = {REGION_NAME: REGIONS[REGION_NAME]}
+    else:
+        regions_to_process = REGIONS
+
+    print(f"Processing {len(regions_to_process)} regions in parallel...")
+
+    max_workers = 1 if REGION_NAME else 5
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(process_region, name, config): name for name, config in regions_to_process.items()}
         
         valid_vrts = []
         for future in as_completed(futures):
@@ -206,8 +272,30 @@ def main():
     
     mosaic_tif = create_mosaic(valid_vrts)
     generate_tiles(mosaic_tif)
+
+    # Optionally upload VRTs and mosaic for debugging/resolution inspection
+    if os.environ.get('DEBUG_UPLOAD') == '1':
+        print('DEBUG_UPLOAD enabled: uploading VRTs and mosaic to S3')
+        for vrt in valid_vrts:
+            key = f"{S3_PREFIX}/debug/{os.path.basename(vrt)}"
+            print(f"Uploading {vrt} -> {key}")
+            try:
+                s3_client.upload_file(vrt, S3_BUCKET, key, ExtraArgs={'ContentType': 'application/xml'})
+            except Exception as e:
+                print(f"Failed to upload {vrt}: {e}")
+        try:
+            key = f"{S3_PREFIX}/debug/{os.path.basename(mosaic_tif)}"
+            print(f"Uploading {mosaic_tif} -> {key}")
+            s3_client.upload_file(mosaic_tif, S3_BUCKET, key, ExtraArgs={'ContentType': 'image/tiff'})
+        except Exception as e:
+            print(f"Failed to upload mosaic: {e}")
     upload_tiles()
-    
+    # Cancel alarm on successful completion
+    try:
+        signal.alarm(0)
+    except Exception:
+        pass
+
     print(f"Completed at {datetime.now()}")
 
 if __name__ == "__main__":

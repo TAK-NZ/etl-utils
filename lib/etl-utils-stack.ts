@@ -9,6 +9,7 @@ import * as route53_targets from 'aws-cdk-lib/aws-route53-targets';
 import * as events_targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as efs from 'aws-cdk-lib/aws-efs';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as events from 'aws-cdk-lib/aws-events';
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
@@ -218,6 +219,28 @@ export class EtlUtilsStack extends cdk.Stack {
       resources: [kmsKeyArn],
     }));
 
+    // Import the KMS key construct and grant the task role additional
+    // permissions (including GenerateDataKey) required for PutObject
+    // when the bucket is encrypted with that key.
+    const kmsKey = kms.Key.fromKeyArn(this, 'ImportedKmsKey', kmsKeyArn);
+    kmsKey.grantEncryptDecrypt(taskRole);
+    // Ensure the KMS key policy explicitly allows the task role to generate data keys.
+    // This is required because KMS enforces both identity-based and resource-based
+    // permissions; granting only an identity policy (above) may still be denied
+    // if the key policy doesn't allow the principal.
+    kmsKey.addToResourcePolicy(new iam.PolicyStatement({
+      principals: [new iam.ArnPrincipal(taskRole.roleArn)],
+      actions: [
+        'kms:GenerateDataKey',
+        'kms:GenerateDataKeyWithoutPlaintext',
+        'kms:Decrypt',
+        'kms:Encrypt',
+        'kms:ReEncrypt*'
+      ],
+      resources: ['*'],
+      effect: iam.Effect.ALLOW,
+    }));
+
     // S3 permissions already granted above for config bucket access
 
     // Add EFS permissions for task role (needed for ais-proxy and tileserver-gl)
@@ -323,11 +346,61 @@ export class EtlUtilsStack extends cdk.Stack {
       } else if (containerName === 'metservice-radar') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.TILES_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+        // Maximum run time for the scheduled radar task (seconds)
+        // Prevents runaway tasks; overridden by env if needed
+        environmentVariables.MAX_RUN_SECONDS = '1800';
       }
 
       // Handle scheduled containers
       if (containerConfig.scheduled) {
-        // Create task definition for scheduled container
+        // If this is the metservice-radar container, create one scheduled
+        // task per region so each region runs independently.
+        if (containerName === 'metservice-radar') {
+          const regions = [
+            'northland', 'auckland', 'bay-of-plenty', 'new-plymouth', 'mahia',
+            'wellington', 'westland', 'christchurch', 'otago', 'invercargill'
+          ];
+
+          regions.forEach((regionName) => {
+            const regionTaskDef = new ecs.FargateTaskDefinition(this, `${containerName}-${regionName}TaskDefinition`, {
+              cpu: 4096,
+              memoryLimitMiB: 8192,
+              taskRole,
+              executionRole: taskExecutionRole,
+            });
+
+            const containerImageForRegion = containerImageUri 
+              ? ecs.ContainerImage.fromRegistry(containerImageUri)
+              : ecs.ContainerImage.fromAsset(`${containerName}/`);
+
+            const envWithRegion: { [key: string]: string } = { ...environmentVariables };
+            envWithRegion.REGION = regionName;
+
+            regionTaskDef.addContainer(containerName, {
+              image: containerImageForRegion,
+              environment: envWithRegion,
+              logging: ecs.LogDrivers.awsLogs({
+                streamPrefix: `${containerName}-${regionName}`,
+                logRetention: envConfig.general.enableDetailedLogging ? 30 : 7,
+              }),
+            });
+
+            const rule = new events.Rule(this, `${containerName}-${regionName}ScheduleRule`, {
+              schedule: events.Schedule.expression('rate(10 minutes)'),
+            });
+
+            rule.addTarget(new events_targets.EcsTask({
+              cluster: ecsCluster,
+              taskDefinition: regionTaskDef,
+              subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+              securityGroups: [securityGroups.ecs],
+            }));
+          });
+
+          return;
+        }
+
+        // Default scheduled container behavior for others
         const taskDefinition = new ecs.FargateTaskDefinition(this, `${containerName}TaskDefinition`, {
           cpu: containerConfig.cpu || 256,
           memoryLimitMiB: containerConfig.memory || 512,
@@ -335,7 +408,6 @@ export class EtlUtilsStack extends cdk.Stack {
           executionRole: taskExecutionRole,
         });
 
-        // Add container to task definition
         const containerImage = containerImageUri 
           ? ecs.ContainerImage.fromRegistry(containerImageUri)
           : ecs.ContainerImage.fromAsset(`${containerName}/`);
@@ -349,12 +421,10 @@ export class EtlUtilsStack extends cdk.Stack {
           }),
         });
 
-        // Create EventBridge rule for scheduling
         const rule = new events.Rule(this, `${containerName}ScheduleRule`, {
           schedule: events.Schedule.expression(containerConfig.schedule!),
         });
 
-        // Add ECS task as target
         rule.addTarget(new events_targets.EcsTask({
           cluster: ecsCluster,
           taskDefinition,
