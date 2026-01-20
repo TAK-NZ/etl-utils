@@ -17,11 +17,15 @@ This CDK stack deploys containerized utility services to the existing TAK infras
 ## Services
 
 ### weather-proxy
-Weather radar proxy service providing access to real-time radar data from [Rain Viewer](https://www.rainviewer.com/api.html) with configurable color schemes including MetService-style colors for New Zealand.
+Weather radar proxy service providing access to real-time radar data from multiple providers:
+- **RainViewer** (public access): Global radar data with 9 color schemes
+- **Rainbow.ai** (premium access): Enhanced radar data requiring API key
+- **MetService Colors**: Authentic New Zealand radar colors for both providers
 
 - **Path**: `/weather-radar/*`
 - **Health Check**: `/weather-radar/health`
-- **Parameters**: `?size=256|512&smooth=0|1&snow=0|1&color=0-8`
+- **Parameters**: `?provider=rainviewer|rainbow&api=key&size=256|512&smooth=0|1&snow=0|1&color=0-8`
+- **Providers**: RainViewer (free), Rainbow.ai (API key required)
 - **Color Schemes**: 9 options including MetService colors (color=0) and RainViewer schemes
 - **Documentation**: [Weather Proxy API](docs/WEATHER_PROXY.md)
 
