@@ -363,8 +363,8 @@ export class EtlUtilsStack extends cdk.Stack {
 
           regions.forEach((regionName) => {
             const regionTaskDef = new ecs.FargateTaskDefinition(this, `${containerName}-${regionName}TaskDefinition`, {
-              cpu: 4096,
-              memoryLimitMiB: 8192,
+              cpu: 2048,
+              memoryLimitMiB: 4096,
               taskRole,
               executionRole: taskExecutionRole,
             });
