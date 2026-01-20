@@ -124,14 +124,20 @@ async function validateApiKey(providedKey) {
   
   // If in public mode (no config file), accept any API key
   if (keys._publicMode) {
-    return { valid: true, keyName: 'public', rateLimit: null };
+    return { valid: true, keyName: 'public', rateLimit: null, providers: ['rainviewer', 'rainbow'] };
   }
   
-  const rainviewerKeys = keys.rainviewer || {};
+  // Check both rainviewer and general API keys
+  const allKeys = { ...keys.rainviewer, ...keys.apiKeys };
   
-  for (const [keyName, keyConfig] of Object.entries(rainviewerKeys)) {
+  for (const [keyName, keyConfig] of Object.entries(allKeys)) {
     if (keyConfig.enabled && keyConfig.key === providedKey) {
-      return { valid: true, keyName, rateLimit: keyConfig.rateLimit };
+      return { 
+        valid: true, 
+        keyName, 
+        rateLimit: keyConfig.rateLimit,
+        providers: keyConfig.providers || ['rainviewer']
+      };
     }
   }
   
@@ -295,58 +301,247 @@ async function applyMetServiceColors(buffer) {
     }
 }
 
-// Fetch radar tile from RainViewer with retry logic
-async function fetchRadarTile(z, x, y, smooth = 0, size = 256, snow = 0, color = 2) {
-    return await retryWithBackoff(async () => {
-        const timestamp = await getLatestTimestamp();
-        const url = `https://tilecache.rainviewer.com/v2/radar/${timestamp}/${size}/${z}/${x}/${y}/${color}/${smooth}_${snow}.png`;
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        
-        try {
-            const response = await fetch(url, {
-                signal: controller.signal,
-                headers: {
-                    'User-Agent': 'weather-proxy/1.0',
-                    'Attribution': 'Weather data provided by RainViewer.com'
-                }
-            });
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                if (response.status === 404) {
-                    throw new Error('Tile not found');
-                } else if (response.status === 429) {
-                    throw new Error('Rate limit exceeded');
-                } else if (response.status >= 500) {
-                    throw new Error(`Server error: ${response.status}`);
-                } else {
-                    throw new Error(`API error: ${response.status}`);
-                }
-            }
-            
-            const arrayBuffer = await response.arrayBuffer();
-            return Buffer.from(arrayBuffer);
-        } catch (error) {
-            clearTimeout(timeoutId);
-            throw error;
-        }
-    });
+// Weather provider abstraction layer
+class WeatherProvider {
+  async getTile(z, x, y, options) {
+    throw new Error('getTile must be implemented by subclass');
+  }
+  
+  async getLatestTimestamp() {
+    throw new Error('getLatestTimestamp must be implemented by subclass');
+  }
 }
 
-// Generate radar tile with enhanced parameters
-async function generateRadarTile(z, x, y, smooth = 0, size = 256, snow = 0, color = 2) {
-    const cacheKey = `radar-${z}-${x}-${y}-${smooth}-${size}-${snow}-${color}`;
+// RainViewer provider implementation
+class RainViewerProvider extends WeatherProvider {
+  async getTile(z, x, y, options) {
+    const { smooth = 0, size = 256, snow = 0, color = 2 } = options;
+    
+    return await retryWithBackoff(async () => {
+      const timestamp = await this.getLatestTimestamp();
+      const rainviewerColor = mapColorToProvider(color, 'rainviewer');
+      const url = `https://tilecache.rainviewer.com/v2/radar/${timestamp}/${size}/${z}/${x}/${y}/${rainviewerColor}/${smooth}_${snow}.png`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'weather-proxy/1.0',
+            'Attribution': 'Weather data provided by RainViewer.com'
+          }
+        });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error('Tile not found');
+          } else if (response.status === 429) {
+            throw new Error('Rate limit exceeded');
+          } else if (response.status >= 500) {
+            throw new Error(`Server error: ${response.status}`);
+          } else {
+            throw new Error(`API error: ${response.status}`);
+          }
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    });
+  }
+  
+  async getLatestTimestamp() {
+    return await getLatestTimestamp();
+  }
+}
+
+// Provider-aware color mapping
+// Maps our unified color scheme to provider-specific values
+function mapColorToProvider(color, provider) {
+  if (provider === 'rainbow') {
+    // Rainbow.ai color mapping
+    const rainbowMap = {
+      0: 'dbz_u8',    // MetService colors (raw dBZ)
+      1: '5',         // Original -> RainViewer (closest match)
+      2: '8',         // Universal Blue -> RainViewer Universal Blue
+      3: '7',         // TITAN -> Titan
+      4: '1',         // TWC -> TWC (Rainbow's primary TWC)
+      5: '3',         // Meteored -> Meteored
+      6: '4',         // NEXRAD -> Nexrad
+      7: '6',         // RAINBOW @ SELEX-SI -> Selex
+      8: '2',         // Dark Sky -> Dark Sky
+      10: '0'         // Rainbow.ai native -> Rainbow
+    };
+    return rainbowMap[color] || '8'; // Default to Universal Blue
+  } else {
+    // RainViewer color mapping (original)
+    return color === 10 ? '2' : color.toString(); // color=10 -> Universal Blue for RainViewer
+  }
+}
+
+// Rainbow.ai provider implementation
+class RainbowProvider extends WeatherProvider {
+  constructor() {
+    super();
+    this.apiKey = null;
+    this.timestampCache = new NodeCache({ stdTTL: 300 }); // 5 minutes cache for timestamps
+  }
+  
+  async loadRainbowApiKey() {
+    if (this.apiKey) return this.apiKey;
+    
+    const keys = await loadApiKeys();
+    this.apiKey = keys.rainbow?.apiKey || process.env.RAINBOW_API_KEY;
+    
+    if (!this.apiKey) {
+      throw new Error('Rainbow.ai API key not configured');
+    }
+    
+    return this.apiKey;
+  }
+  
+  async getLatestTimestamp() {
+    const cached = this.timestampCache.get('latest');
+    if (cached) return cached;
+    
+    // Rainbow.ai requires 10-minute aligned timestamps (epoch UTC seconds)
+    // and tiles are accessible up to 2 hours before latest snapshot
+    const now = Math.floor(Date.now() / 1000);
+    
+    // Align to 10-minute intervals (600 seconds)
+    const aligned = Math.floor(now / 600) * 600;
+    
+    // Use a timestamp from 10-20 minutes ago to ensure data availability
+    const timestamp = aligned - 600; // 10 minutes ago
+    
+    this.timestampCache.set('latest', timestamp);
+    return timestamp;
+  }
+  
+  async getTile(z, x, y, options) {
+    const { color = 2, size = 256, forecast = 0 } = options;
+    const apiKey = await this.loadRainbowApiKey();
+    
+    return await retryWithBackoff(async () => {
+      const rainbowColor = mapColorToProvider(color, 'rainbow');
+      
+      // Get a valid timestamp from Rainbow.ai
+      const timestamp = await this.getLatestTimestamp();
+      
+      // Convert forecast minutes to seconds and validate range
+      const forecastSeconds = Math.min(14400, Math.max(0, forecast * 60));
+      
+      const url = `https://api.rainbow.ai/tiles/v1/precip/${timestamp}/${forecastSeconds}/${z}/${x}/${y}?color=${rainbowColor}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'Ocp-Apim-Subscription-Key': apiKey,
+            'User-Agent': 'weather-proxy/1.0'
+          }
+        });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          if (response.status === 401) {
+            throw new Error('Rainbow.ai subscription key invalid');
+          } else if (response.status === 404) {
+            throw new Error('Tile not found');
+          } else if (response.status === 429) {
+            throw new Error('Rate limit exceeded');
+          } else if (response.status >= 500) {
+            throw new Error(`Server error: ${response.status}`);
+          } else {
+            throw new Error(`API error: ${response.status}`);
+          }
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        let buffer = Buffer.from(arrayBuffer);
+        
+        // Rainbow.ai only returns 256x256 tiles
+        // If 512x512 is requested, upscale the image
+        if (size === 512) {
+          buffer = await sharp(buffer)
+            .resize(512, 512, { kernel: 'nearest' })
+            .png()
+            .toBuffer();
+        }
+        
+        return buffer;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw error;
+      }
+    });
+  }
+}
+
+// Provider instances
+const rainviewerProvider = new RainViewerProvider();
+const rainbowProvider = new RainbowProvider();
+
+// Get provider instance
+function getProvider(providerName) {
+  switch (providerName) {
+    case 'rainbow':
+      return rainbowProvider;
+    case 'rainviewer':
+    default:
+      return rainviewerProvider;
+  }
+}
+
+// Fetch tile with provider and failover
+async function fetchTileWithProvider(z, x, y, options) {
+  const { provider = 'rainviewer', api } = options;
+  
+  // Rainbow.ai requires API key
+  if (provider === 'rainbow' && !api) {
+    throw new Error('API key required for Rainbow.ai provider');
+  }
+  
+  try {
+    const providerInstance = getProvider(provider);
+    return await providerInstance.getTile(z, x, y, options);
+  } catch (error) {
+    // Only fallback to RainViewer if Rainbow.ai fails
+    if (provider === 'rainbow') {
+      console.warn('Rainbow.ai failed, falling back to RainViewer:', error.message);
+      return await rainviewerProvider.getTile(z, x, y, options);
+    }
+    throw error;
+  }
+}
+
+// Legacy function for backward compatibility
+async function fetchRadarTile(z, x, y, smooth = 0, size = 256, snow = 0, color = 2) {
+  return await rainviewerProvider.getTile(z, x, y, { smooth, size, snow, color });
+}
+
+// Generate radar tile with enhanced parameters and provider support
+async function generateRadarTile(z, x, y, options = {}) {
+    const { smooth = 0, size = 256, snow = 0, color = 2, provider = 'rainviewer', api, forecast = 0 } = options;
+    const cacheKey = `radar-${provider}-${z}-${x}-${y}-${smooth}-${size}-${snow}-${color}-${forecast}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
     try {
-        let buffer = await fetchRadarTile(z, x, y, smooth, size, snow, color);
+        let buffer = await fetchTileWithProvider(z, x, y, options);
         
-        // Apply MetService color mapping if using dBZ color scheme (0) and metservice parameter is set
+        // Apply MetService color mapping if using dBZ color scheme (0)
         if (color === 0) {
-            console.log(`Applying MetService color mapping for tile ${z}/${x}/${y}`);
+            console.log(`Applying MetService color mapping for tile ${z}/${x}/${y} (provider: ${provider})`);
             buffer = await applyMetServiceColors(buffer);
         }
         
@@ -354,7 +549,7 @@ async function generateRadarTile(z, x, y, smooth = 0, size = 256, snow = 0, colo
         return buffer;
         
     } catch (error) {
-        console.error(`Error generating radar tile ${z}/${x}/${y}:`, error.message);
+        console.error(`Error generating radar tile ${z}/${x}/${y} (provider: ${provider}):`, error.message);
         // Return empty transparent tile on error
         const buffer = await sharp({
             create: {
@@ -372,22 +567,41 @@ async function generateRadarTile(z, x, y, smooth = 0, size = 256, snow = 0, colo
 app.get('/weather-radar/health', async (req, res) => {
     try {
         const keys = await loadApiKeys();
-        const enabledKeys = Object.values(keys.rainviewer || {}).filter(k => k.enabled).length;
+        const rainviewerKeys = Object.values(keys.rainviewer || {}).filter(k => k.enabled).length;
+        const apiKeys = Object.values(keys.apiKeys || {}).filter(k => k.enabled).length;
+        const rainbowConfigured = !!(keys.rainbow?.apiKey || process.env.RAINBOW_API_KEY);
         
         res.json({ 
             status: 'ok', 
             cache_keys: cache.keys().length,
             timestamp_cache: timestampCache.keys().length,
-            api_keys_configured: enabledKeys,
+            api_keys_configured: rainviewerKeys + apiKeys,
             public_mode: !!keys._publicMode,
             config_bucket: !!CONFIG_BUCKET,
+            providers: {
+                rainviewer: {
+                    enabled: true,
+                    requires_api_key: false
+                },
+                rainbow: {
+                    enabled: rainbowConfigured,
+                    requires_api_key: true
+                }
+            },
             supported_parameters: {
+                provider: ['rainviewer', 'rainbow'],
+                provider_default: 'rainviewer',
                 size: [256, 512],
                 smooth: [0, 1],
                 snow: [0, 1],
-                color: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+                color: [0, 1, 2, 3, 4, 5, 6, 7, 8, 10],
                 color_default: 2,
-                metservice_mapping: 'Applied automatically for color=0'
+                forecast: [0, 240],
+                forecast_default: 0,
+                forecast_provider: 'rainbow',
+                metservice_mapping: 'Applied automatically for color=0',
+                rainbow_native: 'Use color=10 for Rainbow.ai native color=0 scheme',
+                api_key_parameter: 'api'
             }
         });
     } catch (error) {
@@ -406,9 +620,27 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
     const size = parseInt(req.query.size) || 256;
     const snow = parseInt(req.query.snow) || 0;
     const color = req.query.color !== undefined ? parseInt(req.query.color) : 2;
-    const apiKey = req.query.key;
+    const provider = req.query.provider || 'rainviewer';
+    const apiKey = req.query.api || req.query.key; // Support both 'api' and 'key' parameters
+    const forecast = parseInt(req.query.forecast) || 0;
     
-    console.log(`Request: ${z}/${x}/${y}.png?color=${color}&size=${size}&smooth=${smooth}&snow=${snow}`);
+    console.log(`Request: ${z}/${x}/${y}.png?provider=${provider}&color=${color}&size=${size}&smooth=${smooth}&snow=${snow}&forecast=${forecast}`);
+    
+    // Rainbow.ai requires API key
+    if (provider === 'rainbow' && !apiKey) {
+        return res.status(401).json({
+            error: 'API key required for Rainbow.ai provider',
+            message: 'Use ?api=your-key parameter'
+        });
+    }
+    
+    // Validate provider
+    if (!['rainviewer', 'rainbow'].includes(provider)) {
+        return res.status(400).json({
+            error: 'Invalid parameter',
+            message: 'provider parameter must be "rainviewer" or "rainbow"'
+        });
+    }
     
     // Validate API key if provided
     let keyValidation = null;
@@ -418,6 +650,14 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
             return res.status(401).json({
                 error: 'Unauthorized',
                 message: keyValidation.reason
+            });
+        }
+        
+        // Check if API key has access to requested provider
+        if (!keyValidation.providers.includes(provider)) {
+            return res.status(403).json({
+                error: 'Forbidden',
+                message: `API key does not have access to ${provider} provider`
             });
         }
         
@@ -464,21 +704,43 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
         });
     }
     
-    if (color < 0 || color > 8) {
+    if (color < 0 || color > 10) {
         return res.status(400).json({
             error: 'Invalid parameter',
-            message: 'color parameter must be 0-8 (see RainViewer color schemes)'
+            message: 'color parameter must be 0-8, 10 (0=MetService, 1-8=RainViewer schemes, 10=Rainbow.ai native)'
+        });
+    }
+    
+    // Validate forecast parameter (Rainbow.ai only)
+    if (forecast < 0 || forecast > 240) {
+        return res.status(400).json({
+            error: 'Invalid parameter',
+            message: 'forecast parameter must be 0-240 minutes (Rainbow.ai only)'
+        });
+    }
+    
+    // Forecast parameter only works with Rainbow.ai
+    if (forecast > 0 && provider !== 'rainbow') {
+        return res.status(400).json({
+            error: 'Invalid parameter',
+            message: 'forecast parameter only supported with provider=rainbow'
         });
     }
     
     try {
-        const tileBuffer = await generateRadarTile(zoom, tileX, tileY, smooth, size, snow, color);
+        const options = { smooth, size, snow, color, provider, api: apiKey, forecast };
+        const tileBuffer = await generateRadarTile(zoom, tileX, tileY, options);
+        
+        const attribution = provider === 'rainbow' 
+            ? 'Weather data provided by Rainbow.ai'
+            : 'Weather data provided by RainViewer.com';
         
         res.set({
             'Content-Type': 'image/png',
             'Cache-Control': 'public, max-age=600',
             'Access-Control-Allow-Origin': '*',
-            'Attribution': 'Weather data provided by RainViewer.com'
+            'Attribution': attribution,
+            'X-Weather-Provider': provider
         });
         
         res.send(tileBuffer);
@@ -495,6 +757,11 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
                 error: 'Tile not found',
                 message: 'Weather data not available for this location'
             });
+        } else if (error.message.includes('API key required')) {
+            return res.status(401).json({
+                error: 'API key required',
+                message: error.message
+            });
         } else {
             return res.status(500).json({
                 error: 'Service unavailable',
@@ -505,7 +772,8 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`RainViewer radar proxy server running on port ${PORT}`);
+    console.log(`Weather radar proxy server running on port ${PORT}`);
     console.log(`Max zoom: ${MAX_ZOOM_LEVEL}, Rate limit: ${RATE_LIMIT_PER_MINUTE}/min`);
-    console.log(`Supports: ?size=256|512, ?smooth=0|1, ?snow=0|1, ?color=0-8 (default: 2)`);
+    console.log(`Providers: RainViewer (public), Rainbow.ai (API key required)`);
+    console.log(`Supports: ?provider=rainviewer|rainbow, ?size=256|512, ?smooth=0|1, ?snow=0|1, ?color=0-8, ?forecast=0-240`);
 });
