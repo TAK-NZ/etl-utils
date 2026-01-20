@@ -6,9 +6,10 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53_targets from 'aws-cdk-lib/aws-route53-targets';
-import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as events_targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as efs from 'aws-cdk-lib/aws-efs';
+import * as events from 'aws-cdk-lib/aws-events';
 // Construct imports
 import { SecurityGroups } from './constructs/security-groups';
 import { Alb } from './constructs/alb';
@@ -200,7 +201,7 @@ export class EtlUtilsStack extends cdk.Stack {
     const configBucketArn = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ENV_CONFIG_BUCKET));
     taskRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
-      actions: ['s3:GetObject'],
+      actions: ['s3:GetObject', 's3:PutObject'],
       resources: [`${configBucketArn}/*`],
     }));
     taskRole.addToPolicy(new iam.PolicyStatement({
@@ -307,6 +308,7 @@ export class EtlUtilsStack extends cdk.Stack {
       if (containerName === 'weather-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-Weather-Proxy-Api-Keys.json';
+        environmentVariables.TILES_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
       } else if (containerName === 'ais-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
         environmentVariables.CONFIG_KEY = 'ETL-Util-AIS-Proxy-Api-Keys.json';
@@ -318,6 +320,49 @@ export class EtlUtilsStack extends cdk.Stack {
           const artifactsBucketName = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ARTIFACTS_BUCKET));
           environmentVariables.S3_BUCKET = cdk.Token.asString(artifactsBucketName);
         }
+      } else if (containerName === 'metservice-radar') {
+        environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+        environmentVariables.TILES_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
+      }
+
+      // Handle scheduled containers
+      if (containerConfig.scheduled) {
+        // Create task definition for scheduled container
+        const taskDefinition = new ecs.FargateTaskDefinition(this, `${containerName}TaskDefinition`, {
+          cpu: containerConfig.cpu || 256,
+          memoryLimitMiB: containerConfig.memory || 512,
+          taskRole,
+          executionRole: taskExecutionRole,
+        });
+
+        // Add container to task definition
+        const containerImage = containerImageUri 
+          ? ecs.ContainerImage.fromRegistry(containerImageUri)
+          : ecs.ContainerImage.fromAsset(`${containerName}/`);
+
+        taskDefinition.addContainer(containerName, {
+          image: containerImage,
+          environment: environmentVariables,
+          logging: ecs.LogDrivers.awsLogs({
+            streamPrefix: containerName,
+            logRetention: envConfig.general.enableDetailedLogging ? 30 : 7,
+          }),
+        });
+
+        // Create EventBridge rule for scheduling
+        const rule = new events.Rule(this, `${containerName}ScheduleRule`, {
+          schedule: events.Schedule.expression(containerConfig.schedule!),
+        });
+
+        // Add ECS task as target
+        rule.addTarget(new events_targets.EcsTask({
+          cluster: ecsCluster,
+          taskDefinition,
+          subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+          securityGroups: [securityGroups.ecs],
+        }));
+
+        return;
       }
 
       // Create container service
@@ -339,7 +384,11 @@ export class EtlUtilsStack extends cdk.Stack {
 
       containerServices[containerName] = containerService;
 
-      // Add ALB listener rule based on routing type
+      // Add ALB listener rule based on routing type (skip for scheduled containers)
+      if (containerConfig.scheduled) {
+        return;
+      }
+      
       if (containerConfig.hostname) {
         // Hostname-based routing with CloudFront
         alb.addHostnameRule(
@@ -382,7 +431,7 @@ export class EtlUtilsStack extends cdk.Stack {
             zone: hostedZone,
             recordName: containerConfig.hostname,
             target: route53.RecordTarget.fromAlias(
-              new targets.CloudFrontTarget(cloudFront.distribution)
+              new route53_targets.CloudFrontTarget(cloudFront.distribution)
             ),
           });
 
@@ -390,7 +439,7 @@ export class EtlUtilsStack extends cdk.Stack {
             zone: hostedZone,
             recordName: containerConfig.hostname,
             target: route53.RecordTarget.fromAlias(
-              new targets.CloudFrontTarget(cloudFront.distribution)
+              new route53_targets.CloudFrontTarget(cloudFront.distribution)
             ),
           });
 

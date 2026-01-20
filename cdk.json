@@ -74,6 +74,16 @@
               }
             ]
           }
+        },
+        "metservice-radar": {
+          "enabled": true,
+          "scheduled": true,
+          "schedule": "rate(3 minutes)",
+          "port": 8080,
+          "healthCheckPath": "/health",
+          "cpu": 1024,
+          "memory": 2048,
+          "imageTag": "v1.0.0"
         }
       },
       "general": {
@@ -148,6 +158,16 @@
               }
             ]
           }
+        },
+        "metservice-radar": {
+          "enabled": true,
+          "scheduled": true,
+          "schedule": "rate(3 minutes)",
+          "port": 8080,
+          "healthCheckPath": "/health",
+          "cpu": 1024,
+          "memory": 2048,
+          "imageTag": "v1.0.0"
         }
       },
       "general": {

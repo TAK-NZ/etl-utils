@@ -14,6 +14,7 @@ const s3Client = new S3Client({ region: process.env.AWS_REGION || 'ap-southeast-
 const PORT = process.env.PORT || 3000;
 const CONFIG_BUCKET = process.env.CONFIG_BUCKET;
 const CONFIG_KEY = process.env.CONFIG_KEY || 'ETL-Util-Weather-Proxy-Api-Keys.json';
+const TILES_BUCKET = process.env.TILES_BUCKET || CONFIG_BUCKET;
 const MAX_ZOOM_LEVEL = 9;
 const RATE_LIMIT_PER_MINUTE = 600; // RainViewer allows 600 requests per minute
 const MAX_RETRIES = 3;
@@ -256,6 +257,35 @@ async function generateRadarTile(z, x, y, smooth = 0, size = 256, snow = 0) {
     }
 }
 
+// Get MetService tile from S3
+async function getMetServiceTile(z, x, y) {
+    const cacheKey = `metservice-${z}-${x}-${y}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const s3Key = `metservice-radar/${z}/${x}/${y}.png`;
+    
+    try {
+        const command = new GetObjectCommand({
+            Bucket: TILES_BUCKET,
+            Key: s3Key
+        });
+        
+        const response = await s3Client.send(command);
+        const buffer = Buffer.from(await response.Body.transformToByteArray());
+        
+        cache.set(cacheKey, buffer);
+        return buffer;
+    } catch (error) {
+        if (error.name === 'NoSuchKey') {
+            return await sharp({
+                create: { width: 256, height: 256, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } }
+            }).png().toBuffer();
+        }
+        throw error;
+    }
+}
+
 // Routes with /weather-radar prefix
 app.get('/weather-radar/health', async (req, res) => {
     try {
@@ -268,7 +298,8 @@ app.get('/weather-radar/health', async (req, res) => {
             timestamp_cache: timestampCache.keys().length,
             api_keys_configured: enabledKeys,
             public_mode: !!keys._publicMode,
-            config_bucket: !!CONFIG_BUCKET
+            config_bucket: !!CONFIG_BUCKET,
+            tiles_bucket: !!TILES_BUCKET
         });
     } catch (error) {
         res.status(500).json({
@@ -371,6 +402,59 @@ app.get('/weather-radar/:z/:x/:y.png', rateLimit, async (req, res) => {
                 message: 'Weather service temporarily unavailable'
             });
         }
+    }
+});
+
+// MetService tiles
+app.get('/weather-radar/metservice/:z/:x/:y.png', rateLimit, async (req, res) => {
+    const { z, x, y } = req.params;
+    const apiKey = req.query.key;
+    
+    if (apiKey) {
+        const keyValidation = await validateApiKey(apiKey);
+        if (!keyValidation.valid) {
+            return res.status(401).json({
+                error: 'Unauthorized',
+                message: keyValidation.reason
+            });
+        }
+        
+        const rateLimitCheck = checkApiKeyRateLimit(apiKey, keyValidation.rateLimit);
+        if (!rateLimitCheck.allowed) {
+            return res.status(429).json({
+                error: 'Rate limit exceeded',
+                message: rateLimitCheck.message
+            });
+        }
+    }
+    
+    const validation = validateTileCoordinates(z, x, y);
+    if (!validation.valid) {
+        return res.status(400).json({
+            error: 'Invalid request',
+            message: validation.error
+        });
+    }
+    
+    const { zoom, tileX, tileY } = validation;
+    
+    try {
+        const tileBuffer = await getMetServiceTile(zoom, tileX, tileY);
+        
+        res.set({
+            'Content-Type': 'image/png',
+            'Cache-Control': 'public, max-age=300',
+            'Access-Control-Allow-Origin': '*',
+            'Attribution': 'Weather data provided by MetService'
+        });
+        
+        res.send(tileBuffer);
+    } catch (error) {
+        console.error('MetService tile error:', error.message);
+        return res.status(404).json({
+            error: 'Tile not found',
+            message: 'MetService data not available for this location'
+        });
     }
 });
 

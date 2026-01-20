@@ -33,6 +33,8 @@ export interface ContainerConfig {
   memory: number;
   priority?: number;
   imageTag: string;
+  scheduled?: boolean;
+  schedule?: string;
   mbtiles?: MBTilesConfig;
   mbtilesMulti?: MBTilesMultiConfig;
 }
