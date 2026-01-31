@@ -53,6 +53,19 @@ jobs:
           aws s3 cp linz-vector-tiles.mbtiles \
             s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
 
+      - name: Force Tileserver Reload
+        run: |
+          CLUSTER_NAME="TAK-${{ vars.DEMO_STACK_NAME }}-Cluster"
+          SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
+            --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
+          
+          if [ -n "$SERVICE_NAME" ]; then
+            echo "Forcing reload of service: $SERVICE_NAME"
+            aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
+          else
+            echo "Tileserver service not found, skipping reload"
+          fi
+
   update-prod-tiles:
     runs-on: ubuntu-latest
     environment: production
@@ -108,3 +121,17 @@ jobs:
             s3://${{ steps.stack.outputs.assets-bucket }}/public/linz-vector-tiles.pmtiles
           aws s3 cp linz-vector-tiles.mbtiles \
             s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
+
+      - name: Force Tileserver Reload
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          CLUSTER_NAME="TAK-${{ vars.PROD_STACK_NAME }}-Cluster"
+          SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
+            --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
+          
+          if [ -n "$SERVICE_NAME" ]; then
+            echo "Forcing reload of service: $SERVICE_NAME"
+            aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
+          else
+            echo "Tileserver service not found, skipping reload"
+          fi
