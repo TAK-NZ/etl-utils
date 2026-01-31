@@ -60,7 +60,7 @@
           "cpu": 2048,
           "memory": 4096,
           "priority": 3,
-          "imageTag": "v1.1.0",
+          "imageTag": "v1.2.0",
           "mbtilesMulti": {
             "enabled": true,
             "files": [
@@ -134,7 +134,7 @@
           "cpu": 2048,
           "memory": 4096,
           "priority": 3,
-          "imageTag": "v1.1.0",
+          "imageTag": "v1.2.0",
           "mbtilesMulti": {
             "enabled": true,
             "files": [
