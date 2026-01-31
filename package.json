@@ -1,8 +1,8 @@
 {
-  "name": "etl-utils",
+  "name": "utils-infra",
   "version": "1.0.0",
-  "description": "CDK Infrastructure for ETL Utilities - Multiple Docker containers on ECS Fargate",
-  "main": "lib/etl-utils-stack.js",
+  "description": "CDK Infrastructure for Utility Services - Multiple Docker containers on ECS Fargate",
+  "main": "lib/utils-infra-stack.js",
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",

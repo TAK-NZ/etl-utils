@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import { EtlUtilsStack } from '../lib/etl-utils-stack';
+import { UtilsInfraStack } from '../lib/utils-infra-stack';
 import { ContextEnvironmentConfig } from '../lib/stack-config';
 import { DEFAULT_AWS_REGION } from '../lib/utils/constants';
 import { generateStandardTags } from '../lib/utils/tag-helpers';
@@ -25,19 +25,19 @@ if (!envConfig) {
 
 // Get defaults with context overrides
 const defaults = {
-  project: app.node.tryGetContext('tak-project') || app.node.tryGetContext('etl-utils-defaults')?.project,
-  component: app.node.tryGetContext('tak-component') || app.node.tryGetContext('etl-utils-defaults')?.component,
-  region: app.node.tryGetContext('tak-region') || app.node.tryGetContext('etl-utils-defaults')?.region
+  project: app.node.tryGetContext('tak-project') || app.node.tryGetContext('utils-infra-defaults')?.project,
+  component: app.node.tryGetContext('tak-component') || app.node.tryGetContext('utils-infra-defaults')?.component,
+  region: app.node.tryGetContext('tak-region') || app.node.tryGetContext('utils-infra-defaults')?.region
 };
 
 // Apply context overrides for command-line parameter support
 const finalEnvConfig = applyContextOverrides(app, envConfig);
 
 // Create stack name
-const stackName = `TAK-${finalEnvConfig.stackName}-EtlUtils`;
+const stackName = `TAK-${finalEnvConfig.stackName}-UtilsInfra`;
 
 // Create the stack
-new EtlUtilsStack(app, stackName, {
+new UtilsInfraStack(app, stackName, {
   environment: envName as 'prod' | 'dev-test',
   envConfig: finalEnvConfig,
   env: {

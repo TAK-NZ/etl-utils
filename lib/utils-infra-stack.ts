@@ -20,19 +20,19 @@ import { ApiAuth } from './constructs/api-auth';
 import { ContextEnvironmentConfig } from './stack-config';
 import { createBaseImportValue, BASE_EXPORT_NAMES } from './cloudformation-imports';
 
-export interface EtlUtilsStackProps extends StackProps {
+export interface UtilsInfraStackProps extends StackProps {
   environment: 'prod' | 'dev-test';
   envConfig: ContextEnvironmentConfig;
 }
 
 /**
- * Main CDK stack for ETL Utils Infrastructure
+ * Main CDK stack for Utils Infrastructure
  */
-export class EtlUtilsStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props: EtlUtilsStackProps) {
+export class UtilsInfraStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: UtilsInfraStackProps) {
     super(scope, id, {
       ...props,
-      description: 'ETL Utils Infrastructure - Multiple Docker containers on ECS Fargate with ALB',
+      description: 'Utils Infrastructure - Multiple Docker containers on ECS Fargate with ALB',
     });
 
     const { environment, envConfig } = props;
@@ -176,7 +176,7 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // Task execution role
     const taskExecutionRole = new iam.Role(this, 'TaskExecutionRole', {
-      roleName: `TAK-${stackNameComponent}-ETL-Utils-task-execution`,
+      roleName: `TAK-${stackNameComponent}-Utils-task-execution`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
@@ -185,7 +185,7 @@ export class EtlUtilsStack extends cdk.Stack {
 
     // Task role
     const taskRole = new iam.Role(this, 'TaskRole', {
-      roleName: `TAK-${stackNameComponent}-ETL-Utils-task`,
+      roleName: `TAK-${stackNameComponent}-Utils-task`,
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
     });
 
@@ -306,13 +306,13 @@ export class EtlUtilsStack extends cdk.Stack {
       const environmentVariables: { [key: string]: string } = {};
       if (containerName === 'weather-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
-        environmentVariables.CONFIG_KEY = 'ETL-Util-Weather-Proxy-Api-Keys.json';
+        environmentVariables.CONFIG_KEY = 'Utils-Weather-Proxy-Api-Keys.json';
       } else if (containerName === 'ais-proxy') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
-        environmentVariables.CONFIG_KEY = 'ETL-Util-AIS-Proxy-Api-Keys.json';
+        environmentVariables.CONFIG_KEY = 'Utils-AIS-Proxy-Api-Keys.json';
       } else if (containerName === 'tileserver-gl') {
         environmentVariables.CONFIG_BUCKET = cdk.Token.asString(Fn.select(5, Fn.split(':', configBucketArn)));
-        environmentVariables.CONFIG_KEY = 'ETL-Util-TileServer-GL-Api-Keys.json';
+        environmentVariables.CONFIG_KEY = 'Utils-TileServer-GL-Api-Keys.json';
         // Add S3 bucket for MBTiles if enabled
         if (containerConfig.mbtiles?.enabled || containerConfig.mbtilesMulti?.enabled) {
           const artifactsBucketName = Fn.importValue(createBaseImportValue(stackNameComponent, BASE_EXPORT_NAMES.ARTIFACTS_BUCKET));
@@ -433,7 +433,7 @@ export class EtlUtilsStack extends cdk.Stack {
     // Utils URL
     new cdk.CfnOutput(this, 'UtilsUrl', {
       value: `https://${alb.utilsFqdn}`,
-      description: 'ETL Utils base URL',
+      description: 'Utils base URL',
       exportName: `${id}-UtilsUrl`,
     });
 
@@ -469,7 +469,7 @@ export class EtlUtilsStack extends cdk.Stack {
     // Utils FQDN
     new cdk.CfnOutput(this, 'UtilsFqdn', {
       value: alb.utilsFqdn,
-      description: 'ETL Utils fully qualified domain name',
+      description: 'Utils fully qualified domain name',
       exportName: `${id}-UtilsFqdn`,
     });
   }

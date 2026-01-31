@@ -1,9 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template, Match } from 'aws-cdk-lib/assertions';
-import { EtlUtilsStack } from '../lib/etl-utils-stack';
+import { UtilsInfraStack } from '../lib/utils-infra-stack';
 import { createTestApp, mockCloudFormationImports } from './utils';
 
-describe('EtlUtilsStack', () => {
+describe('UtilsInfraStack', () => {
   let app: cdk.App;
 
   beforeEach(() => {
@@ -14,7 +14,7 @@ describe('EtlUtilsStack', () => {
   it('creates stack with dev-test configuration', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -39,7 +39,7 @@ describe('EtlUtilsStack', () => {
   it('creates stack with production configuration', () => {
     const envConfig = app.node.tryGetContext('prod');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'prod',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -55,7 +55,7 @@ describe('EtlUtilsStack', () => {
   it('imports base infrastructure resources correctly', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    new EtlUtilsStack(app, 'TestStack', {
+    new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -68,7 +68,7 @@ describe('EtlUtilsStack', () => {
   it('creates IAM roles with correct permissions', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -78,7 +78,7 @@ describe('EtlUtilsStack', () => {
 
     // Check task execution role
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'TAK-Dev-ETL-Utils-task-execution',
+      RoleName: 'TAK-Dev-Utils-task-execution',
       AssumeRolePolicyDocument: {
         Statement: [{
           Effect: 'Allow',
@@ -89,7 +89,7 @@ describe('EtlUtilsStack', () => {
 
     // Check task role
     template.hasResourceProperties('AWS::IAM::Role', {
-      RoleName: 'TAK-Dev-ETL-Utils-task',
+      RoleName: 'TAK-Dev-Utils-task',
       AssumeRolePolicyDocument: {
         Statement: [{
           Effect: 'Allow',
@@ -138,7 +138,7 @@ describe('EtlUtilsStack', () => {
   it('adds ECS Exec permissions when enabled', () => {
     const envConfig = app.node.tryGetContext('prod'); // prod has ECS Exec enabled
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'prod',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -155,7 +155,7 @@ describe('EtlUtilsStack', () => {
   it('creates Route53 records for ALB', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -177,7 +177,7 @@ describe('EtlUtilsStack', () => {
   it('creates ALB listener rules for enabled containers', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -208,7 +208,7 @@ describe('EtlUtilsStack', () => {
   it('creates stack outputs', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -230,7 +230,7 @@ describe('EtlUtilsStack', () => {
   it('configures EFS file system with encryption', () => {
     const envConfig = app.node.tryGetContext('dev-test');
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -267,14 +267,14 @@ describe('EtlUtilsStack', () => {
     const prodConfig = app.node.tryGetContext('prod');
     
     // Test dev-test (DESTROY)
-    const devStack = new EtlUtilsStack(app, 'DevStack', {
+    const devStack = new UtilsInfraStack(app, 'DevStack', {
       environment: 'dev-test',
       envConfig: devConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
     });
 
     // Test prod (RETAIN)
-    const prodStack = new EtlUtilsStack(app, 'ProdStack', {
+    const prodStack = new UtilsInfraStack(app, 'ProdStack', {
       environment: 'prod',
       envConfig: prodConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }
@@ -300,7 +300,7 @@ describe('EtlUtilsStack', () => {
       }
     };
     
-    const stack = new EtlUtilsStack(app, 'TestStack', {
+    const stack = new UtilsInfraStack(app, 'TestStack', {
       environment: 'dev-test',
       envConfig,
       env: { account: '123456789012', region: 'ap-southeast-2' }

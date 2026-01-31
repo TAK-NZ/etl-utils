@@ -1,5 +1,5 @@
 /**
- * ALB Construct - Application Load Balancer for ETL Utils services
+ * ALB Construct - Application Load Balancer for Utils services
  */
 import { Construct } from 'constructs';
 import {
@@ -52,7 +52,7 @@ export interface AlbProps {
 }
 
 /**
- * CDK construct for the Application Load Balancer for ETL Utils
+ * CDK construct for the Application Load Balancer for Utils
  */
 export class Alb extends Construct {
   /**
@@ -98,7 +98,7 @@ export class Alb extends Construct {
 
     // Create application load balancer
     this.loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'ALB', {
-      loadBalancerName: `etl-utils-${contextConfig.stackName.toLowerCase()}`,
+      loadBalancerName: `utils-infra-${contextConfig.stackName.toLowerCase()}`,
       vpc,
       internetFacing: true,
       ipAddressType: elbv2.IpAddressType.DUAL_STACK,
@@ -107,7 +107,7 @@ export class Alb extends Construct {
 
     // Create default target group for health checks
     this.defaultTargetGroup = new elbv2.ApplicationTargetGroup(this, 'DefaultTargetGroup', {
-      targetGroupName: `etl-utils-${contextConfig.stackName.toLowerCase()}-default`,
+      targetGroupName: `utils-infra-${contextConfig.stackName.toLowerCase()}-default`,
       vpc,
       targetType: elbv2.TargetType.IP,
       port: 80,
@@ -150,7 +150,7 @@ export class Alb extends Construct {
     // Enable ALB access logging
     this.loadBalancer.setAttribute('access_logs.s3.enabled', 'true');
     this.loadBalancer.setAttribute('access_logs.s3.bucket', logsBucket.bucketName);
-    this.loadBalancer.setAttribute('access_logs.s3.prefix', `TAK-${contextConfig.stackName}-EtlUtils`);
+    this.loadBalancer.setAttribute('access_logs.s3.prefix', `TAK-${contextConfig.stackName}-UtilsInfra`);
     
     // Configure ALB for larger request bodies (AIS uploads)
     this.loadBalancer.setAttribute('routing.http2.enabled', 'true');
