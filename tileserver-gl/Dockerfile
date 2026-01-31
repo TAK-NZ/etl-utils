@@ -6,8 +6,14 @@ USER root
 # Set environment to non-interactive
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install curl, xvfb for virtual display, and AWS CLI for S3 config
-RUN apt-get update && apt-get install -y --no-install-recommends curl xvfb awscli && rm -rf /var/lib/apt/lists/*
+# Install curl, xvfb for virtual display, and unzip for AWS CLI installation
+RUN apt-get update && apt-get install -y --no-install-recommends curl xvfb unzip && rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip aws
 
 # Create config directory
 RUN mkdir -p /data
