@@ -53,18 +53,56 @@ jobs:
           aws s3 cp linz-vector-tiles.mbtiles \
             s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
 
-      - name: Force Tileserver Reload
+      - name: Force Tileserver Reload with Fresh Download
         run: |
           CLUSTER_NAME="TAK-${{ vars.DEMO_STACK_NAME }}-Cluster"
           SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
             --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
           
-          if [ -n "$SERVICE_NAME" ]; then
-            echo "Forcing reload of service: $SERVICE_NAME"
-            aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
-          else
+          if [ -z "$SERVICE_NAME" ]; then
             echo "Tileserver service not found, skipping reload"
+            exit 0
           fi
+          
+          echo "Found service: $SERVICE_NAME"
+          
+          # Get current task definition
+          TASK_DEF_ARN=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME \
+            --query 'services[0].taskDefinition' --output text)
+          
+          echo "Current task definition: $TASK_DEF_ARN"
+          
+          # Get and modify task definition
+          aws ecs describe-task-definition --task-definition $TASK_DEF_ARN \
+            --query 'taskDefinition' > /tmp/task-def.json
+          
+          # Update FORCE_DOWNLOAD in tile-downloader container
+          jq '.containerDefinitions |= map(
+            if .name == "tile-downloader" then
+              .environment |= (map(if .name == "FORCE_DOWNLOAD" then .value = "true" else . end) |
+              if (map(.name) | contains(["FORCE_DOWNLOAD"]) | not) then
+                . + [{"name": "FORCE_DOWNLOAD", "value": "true"}]
+              else . end)
+            else . end
+          ) | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, 
+             volumes, placementConstraints, requiresCompatibilities, cpu, memory}' \
+            /tmp/task-def.json > /tmp/new-task-def.json
+          
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+          
+          # Update service with new task definition and force deployment
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --force-new-deployment
+          
+          echo "Service updated - new tasks will download fresh tiles from S3"
 
   update-prod-tiles:
     runs-on: ubuntu-latest
@@ -122,16 +160,54 @@ jobs:
           aws s3 cp linz-vector-tiles.mbtiles \
             s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
 
-      - name: Force Tileserver Reload
+      - name: Force Tileserver Reload with Fresh Download
         if: steps.check.outputs.enabled == 'true'
         run: |
           CLUSTER_NAME="TAK-${{ vars.PROD_STACK_NAME }}-Cluster"
           SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
             --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
           
-          if [ -n "$SERVICE_NAME" ]; then
-            echo "Forcing reload of service: $SERVICE_NAME"
-            aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment
-          else
+          if [ -z "$SERVICE_NAME" ]; then
             echo "Tileserver service not found, skipping reload"
+            exit 0
           fi
+          
+          echo "Found service: $SERVICE_NAME"
+          
+          # Get current task definition
+          TASK_DEF_ARN=$(aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME \
+            --query 'services[0].taskDefinition' --output text)
+          
+          echo "Current task definition: $TASK_DEF_ARN"
+          
+          # Get and modify task definition
+          aws ecs describe-task-definition --task-definition $TASK_DEF_ARN \
+            --query 'taskDefinition' > /tmp/task-def.json
+          
+          # Update FORCE_DOWNLOAD in tile-downloader container
+          jq '.containerDefinitions |= map(
+            if .name == "tile-downloader" then
+              .environment |= (map(if .name == "FORCE_DOWNLOAD" then .value = "true" else . end) |
+              if (map(.name) | contains(["FORCE_DOWNLOAD"]) | not) then
+                . + [{"name": "FORCE_DOWNLOAD", "value": "true"}]
+              else . end)
+            else . end
+          ) | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, 
+             volumes, placementConstraints, requiresCompatibilities, cpu, memory}' \
+            /tmp/task-def.json > /tmp/new-task-def.json
+          
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+          
+          # Update service with new task definition and force deployment
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --force-new-deployment
+          
+          echo "Service updated - new tasks will download fresh tiles from S3"
