@@ -224,7 +224,7 @@ For enhanced rate limits with RainViewer provider.
 ### Premium API Keys (Required for Rainbow.ai)
 For access to Rainbow.ai provider with custom rate limits and provider permissions.
 
-**S3 Location**: `s3://{config-bucket}/ETL-Util-Weather-Proxy-Api-Keys.json`
+**S3 Location**: `s3://{config-bucket}/Utils-Weather-Proxy-Api-Keys.json`
 
 **File Format**:
 ```json

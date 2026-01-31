@@ -110,7 +110,7 @@ export function createTestApp(): cdk.App {
       },
       'tak-defaults': {
         project: 'TAK',
-        component: 'EtlUtils',
+        component: 'UtilsInfra',
         region: 'ap-southeast-2'
       }
     }
@@ -134,5 +134,5 @@ export function mockCloudFormationImports(app: cdk.App): void {
   app.node.setContext('TAK-Dev-BaseInfra-S3ElbLogs', 'arn:aws:s3:::tak-dev-logs-bucket');
   app.node.setContext('TAK-Dev-BaseInfra-EnvConfigBucket', 'arn:aws:s3:::tak-dev-config-bucket');
   app.node.setContext('TAK-Dev-BaseInfra-KmsKey', 'arn:aws:kms:ap-southeast-2:123456789012:key/12345678-1234-1234-1234-123456789012');
-  app.node.setContext('TAK-Dev-BaseInfra-EcrEtlRepo', 'arn:aws:ecr:ap-southeast-2:123456789012:repository/tak-dev-etl-utils');
+  app.node.setContext('TAK-Dev-BaseInfra-EcrEtlRepo', 'arn:aws:ecr:ap-southeast-2:123456789012:repository/tak-dev-utils-infra');
 }

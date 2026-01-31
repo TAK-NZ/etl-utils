@@ -168,9 +168,9 @@
         }
       }
     },
-    "etl-utils-defaults": {
+    "utils-infra-defaults": {
       "project": "TAK.NZ",
-      "component": "EtlUtils",
+      "component": "UtilsInfra",
       "region": "ap-southeast-2"
     },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
