@@ -1,0 +1,122 @@
+name: Update LINZ Vector Tiles
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'  # Run at 2 AM on the 1st of every month
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  update-demo-tiles:
+    runs-on: ubuntu-latest
+    environment: demo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup CDK Environment
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-role-arn: ${{ secrets.DEMO_AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.DEMO_AWS_REGION }}
+          role-session-name: GitHubActions-UpdateTiles
+
+      - name: Install pmtiles
+        run: |
+          wget -q https://github.com/protomaps/go-pmtiles/releases/latest/download/go-pmtiles_1.22.1_Linux_x86_64.tar.gz
+          tar xzf go-pmtiles_1.22.1_Linux_x86_64.tar.gz
+          chmod +x pmtiles
+
+      - name: Get Stack Outputs
+        id: stack
+        run: |
+          ASSETS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-CloudTAK \
+            --query 'Stacks[0].Outputs[?OutputKey==`AssetsBucketNameOutput`].OutputValue' \
+            --output text)
+          
+          ARTIFACTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-BaseInfra \
+            --query 'Stacks[0].Outputs[?OutputKey==`ArtifactsBucketNameOutput`].OutputValue' \
+            --output text)
+          
+          echo "assets-bucket=$ASSETS_BUCKET" >> $GITHUB_OUTPUT
+          echo "artifacts-bucket=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Download and Convert LINZ Tiles
+        run: |
+          wget -O linz-vector-tiles.mbtiles \
+            "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"
+          ./pmtiles convert linz-vector-tiles.mbtiles linz-vector-tiles.pmtiles
+
+      - name: Upload to S3
+        run: |
+          aws s3 cp linz-vector-tiles.pmtiles \
+            s3://${{ steps.stack.outputs.assets-bucket }}/public/linz-vector-tiles.pmtiles
+          aws s3 cp linz-vector-tiles.mbtiles \
+            s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
+
+  update-prod-tiles:
+    runs-on: ubuntu-latest
+    environment: production
+    needs: update-demo-tiles
+    if: vars.PROD_DEPLOYED == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if tileserver-gl is enabled
+        id: check
+        run: |
+          ENABLED=$(jq -r '.context["prod"].containers["tileserver-gl"].enabled' cdk.json)
+          echo "enabled=$ENABLED" >> $GITHUB_OUTPUT
+        
+      - name: Setup CDK Environment
+        if: steps.check.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-cdk
+        with:
+          aws-role-arn: ${{ secrets.PROD_AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.PROD_AWS_REGION }}
+          role-session-name: GitHubActions-UpdateTiles
+
+      - name: Install pmtiles
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          wget -q https://github.com/protomaps/go-pmtiles/releases/latest/download/go-pmtiles_1.22.1_Linux_x86_64.tar.gz
+          tar xzf go-pmtiles_1.22.1_Linux_x86_64.tar.gz
+          chmod +x pmtiles
+
+      - name: Get Stack Outputs
+        if: steps.check.outputs.enabled == 'true'
+        id: stack
+        run: |
+          ASSETS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name TAK-${{ vars.PROD_STACK_NAME }}-CloudTAK \
+            --query 'Stacks[0].Outputs[?OutputKey==`AssetsBucketNameOutput`].OutputValue' \
+            --output text)
+          
+          ARTIFACTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name TAK-${{ vars.PROD_STACK_NAME }}-BaseInfra \
+            --query 'Stacks[0].Outputs[?OutputKey==`ArtifactsBucketNameOutput`].OutputValue' \
+            --output text)
+          
+          echo "assets-bucket=$ASSETS_BUCKET" >> $GITHUB_OUTPUT
+          echo "artifacts-bucket=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
+
+      - name: Download and Convert LINZ Tiles
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          wget -O linz-vector-tiles.mbtiles \
+            "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"
+          ./pmtiles convert linz-vector-tiles.mbtiles linz-vector-tiles.pmtiles
+
+      - name: Upload to S3
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          aws s3 cp linz-vector-tiles.pmtiles \
+            s3://${{ steps.stack.outputs.assets-bucket }}/public/linz-vector-tiles.pmtiles
+          aws s3 cp linz-vector-tiles.mbtiles \
+            s3://${{ steps.stack.outputs.artifacts-bucket }}/linz-vector-tiles.mbtiles
