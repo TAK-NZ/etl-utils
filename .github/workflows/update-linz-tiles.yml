@@ -42,8 +42,23 @@ jobs:
 
       - name: Download and Convert LINZ Tiles
         run: |
-          wget -O linz-vector-tiles.mbtiles \
-            "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"
+          MAX_RETRIES=3
+          RETRY=0
+          while [ $RETRY -lt $MAX_RETRIES ]; do
+            echo "Download attempt $((RETRY+1))/$MAX_RETRIES"
+            if wget -O linz-vector-tiles.mbtiles \
+              "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"; then
+              break
+            fi
+            RETRY=$((RETRY+1))
+            [ $RETRY -lt $MAX_RETRIES ] && sleep 10
+          done
+          
+          if [ $RETRY -eq $MAX_RETRIES ]; then
+            echo "Failed to download after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
           ./pmtiles convert linz-vector-tiles.mbtiles linz-vector-tiles.pmtiles
 
       - name: Upload to S3
@@ -148,8 +163,23 @@ jobs:
       - name: Download and Convert LINZ Tiles
         if: steps.check.outputs.enabled == 'true'
         run: |
-          wget -O linz-vector-tiles.mbtiles \
-            "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"
+          MAX_RETRIES=3
+          RETRY=0
+          while [ $RETRY -lt $MAX_RETRIES ]; do
+            echo "Download attempt $((RETRY+1))/$MAX_RETRIES"
+            if wget -O linz-vector-tiles.mbtiles \
+              "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"; then
+              break
+            fi
+            RETRY=$((RETRY+1))
+            [ $RETRY -lt $MAX_RETRIES ] && sleep 10
+          done
+          
+          if [ $RETRY -eq $MAX_RETRIES ]; then
+            echo "Failed to download after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          
           ./pmtiles convert linz-vector-tiles.mbtiles linz-vector-tiles.pmtiles
 
       - name: Upload to S3
