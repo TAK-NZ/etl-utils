@@ -47,7 +47,7 @@ describe('Alb Construct', () => {
 
     // Check ALB creation
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::LoadBalancer', {
-      Name: 'etl-utils-dev',
+      Name: 'utils-infra-dev',
       Type: 'application',
       Scheme: 'internet-facing',
       IpAddressType: 'dualstack',
@@ -123,7 +123,7 @@ describe('Alb Construct', () => {
 
     // Check default target group
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
-      Name: 'etl-utils-dev-default',
+      Name: 'utils-infra-dev-default',
       Port: 80,
       Protocol: 'HTTP',
       TargetType: 'ip',
@@ -211,7 +211,7 @@ describe('Alb Construct', () => {
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::LoadBalancer', {
       LoadBalancerAttributes: Match.arrayWith([
         { Key: 'access_logs.s3.enabled', Value: 'true' },
-        { Key: 'access_logs.s3.prefix', Value: 'TAK-Prod-EtlUtils' }
+        { Key: 'access_logs.s3.prefix', Value: 'TAK-Prod-UtilsInfra' }
       ])
     });
   });
@@ -232,11 +232,11 @@ describe('Alb Construct', () => {
 
     // Check production naming
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::LoadBalancer', {
-      Name: 'etl-utils-prod',
+      Name: 'utils-infra-prod',
     });
 
     template.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', {
-      Name: 'etl-utils-prod-default',
+      Name: 'utils-infra-prod-default',
     });
   });
 });
