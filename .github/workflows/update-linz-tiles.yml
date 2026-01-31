@@ -33,15 +33,9 @@ jobs:
       - name: Get Stack Outputs
         id: stack
         run: |
-          ASSETS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-CloudTAK \
-            --query 'Stacks[0].Outputs[?OutputKey==`AssetsBucketNameOutput`].OutputValue' \
-            --output text)
-          
-          ARTIFACTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name TAK-${{ vars.DEMO_STACK_NAME }}-BaseInfra \
-            --query 'Stacks[0].Outputs[?OutputKey==`ArtifactsBucketNameOutput`].OutputValue' \
-            --output text)
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ASSETS_BUCKET="tak-$(echo ${{ vars.DEMO_STACK_NAME }} | tr '[:upper:]' '[:lower:]')-cloudtak-${{ secrets.DEMO_AWS_REGION }}-${AWS_ACCOUNT_ID}-assets"
+          ARTIFACTS_BUCKET="tak-$(echo ${{ vars.DEMO_STACK_NAME }} | tr '[:upper:]' '[:lower:]')-baseinfra-${{ secrets.DEMO_AWS_REGION }}-${AWS_ACCOUNT_ID}-artifacts"
           
           echo "assets-bucket=$ASSETS_BUCKET" >> $GITHUB_OUTPUT
           echo "artifacts-bucket=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
@@ -93,15 +87,9 @@ jobs:
         if: steps.check.outputs.enabled == 'true'
         id: stack
         run: |
-          ASSETS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name TAK-${{ vars.PROD_STACK_NAME }}-CloudTAK \
-            --query 'Stacks[0].Outputs[?OutputKey==`AssetsBucketNameOutput`].OutputValue' \
-            --output text)
-          
-          ARTIFACTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name TAK-${{ vars.PROD_STACK_NAME }}-BaseInfra \
-            --query 'Stacks[0].Outputs[?OutputKey==`ArtifactsBucketNameOutput`].OutputValue' \
-            --output text)
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ASSETS_BUCKET="tak-$(echo ${{ vars.PROD_STACK_NAME }} | tr '[:upper:]' '[:lower:]')-cloudtak-${{ secrets.PROD_AWS_REGION }}-${AWS_ACCOUNT_ID}-assets"
+          ARTIFACTS_BUCKET="tak-$(echo ${{ vars.PROD_STACK_NAME }} | tr '[:upper:]' '[:lower:]')-baseinfra-${{ secrets.PROD_AWS_REGION }}-${AWS_ACCOUNT_ID}-artifacts"
           
           echo "assets-bucket=$ASSETS_BUCKET" >> $GITHUB_OUTPUT
           echo "artifacts-bucket=$ARTIFACTS_BUCKET" >> $GITHUB_OUTPUT
