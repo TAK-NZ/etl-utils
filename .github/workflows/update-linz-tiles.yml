@@ -70,7 +70,7 @@ jobs:
 
       - name: Force Tileserver Reload with Fresh Download
         run: |
-          CLUSTER_NAME="TAK-${{ vars.DEMO_STACK_NAME }}-Cluster"
+          CLUSTER_NAME="TAK-${{ vars.DEMO_STACK_NAME }}-BaseInfra"
           SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
             --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
           
@@ -193,7 +193,7 @@ jobs:
       - name: Force Tileserver Reload with Fresh Download
         if: steps.check.outputs.enabled == 'true'
         run: |
-          CLUSTER_NAME="TAK-${{ vars.PROD_STACK_NAME }}-Cluster"
+          CLUSTER_NAME="TAK-${{ vars.PROD_STACK_NAME }}-BaseInfra"
           SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME \
             --query 'serviceArns[?contains(@, `tileserver-gl`)]' --output text | xargs -n1 basename)
           
@@ -216,6 +216,31 @@ jobs:
           
           # Update FORCE_DOWNLOAD in tile-downloader container
           jq '.containerDefinitions |= map(
+            if .name == "tile-downloader" then
+              .environment |= (map(if .name == "FORCE_DOWNLOAD" then .value = "true" else . end) |
+              if (map(.name) | contains(["FORCE_DOWNLOAD"]) | not) then
+                . + [{"name": "FORCE_DOWNLOAD", "value": "true"}]
+              else . end)
+            else . end
+          ) | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, 
+             volumes, placementConstraints, requiresCompatibilities, cpu, memory}' \
+            /tmp/task-def.json > /tmp/new-task-def.json
+          
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/new-task-def.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+          
+          # Update service with new task definition and force deployment
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $NEW_TASK_DEF_ARN \
+            --force-new-deployment
+          
+          echo "Service updated - new tasks will download fresh tiles from S3"
             if .name == "tile-downloader" then
               .environment |= (map(if .name == "FORCE_DOWNLOAD" then .value = "true" else . end) |
               if (map(.name) | contains(["FORCE_DOWNLOAD"]) | not) then
