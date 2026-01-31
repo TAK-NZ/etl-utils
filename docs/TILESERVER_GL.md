@@ -71,7 +71,7 @@ The service uses LINZ Basemaps API for tile data and requires API key authentica
 }
 ```
 
-**Path**: `ETL-Util-TileServer-GL-Api-Keys.json`
+**Path**: `Utils-TileServer-GL-Api-Keys.json`
 
 - `authkey`: NZ Emergency Management API credentials
 - `apikey`: LINZ Basemaps API credentials

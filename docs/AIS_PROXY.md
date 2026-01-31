@@ -213,7 +213,7 @@ The ais-proxy service loads API keys from S3 for user authentication and AISStre
 
 ### AISStream Configuration
 
-**S3 Location**: `s3://{config-bucket}/ETL-Util-AIS-Proxy-Api-Keys.json`
+**S3 Location**: `s3://{config-bucket}/Utils-AIS-Proxy-Api-Keys.json`
 
 **File Format:**
 ```json
