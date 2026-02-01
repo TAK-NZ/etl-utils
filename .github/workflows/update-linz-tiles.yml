@@ -46,10 +46,23 @@ jobs:
           RETRY=0
           while [ $RETRY -lt $MAX_RETRIES ]; do
             echo "Download attempt $((RETRY+1))/$MAX_RETRIES"
-            if wget -O linz-vector-tiles.mbtiles \
-              "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"; then
+            
+            # Get fresh redirect URL on each attempt
+            DOWNLOAD_URL=$(curl -sI "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}" \
+              | grep -i "^location:" | cut -d' ' -f2 | tr -d '\r')
+            
+            if [ -z "$DOWNLOAD_URL" ]; then
+              echo "Failed to get download URL"
+              RETRY=$((RETRY+1))
+              [ $RETRY -lt $MAX_RETRIES ] && sleep 10
+              continue
+            fi
+            
+            echo "Got fresh download URL, starting download..."
+            if wget -O linz-vector-tiles.mbtiles "$DOWNLOAD_URL"; then
               break
             fi
+            
             RETRY=$((RETRY+1))
             [ $RETRY -lt $MAX_RETRIES ] && sleep 10
           done
@@ -167,10 +180,23 @@ jobs:
           RETRY=0
           while [ $RETRY -lt $MAX_RETRIES ]; do
             echo "Download attempt $((RETRY+1))/$MAX_RETRIES"
-            if wget -O linz-vector-tiles.mbtiles \
-              "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}"; then
+            
+            # Get fresh redirect URL on each attempt
+            DOWNLOAD_URL=$(curl -sI "https://basemaps.linz.govt.nz/v1/export/topographic-v2/3857.mbtiles?api=${{ secrets.LINZ_API_KEY }}" \
+              | grep -i "^location:" | cut -d' ' -f2 | tr -d '\r')
+            
+            if [ -z "$DOWNLOAD_URL" ]; then
+              echo "Failed to get download URL"
+              RETRY=$((RETRY+1))
+              [ $RETRY -lt $MAX_RETRIES ] && sleep 10
+              continue
+            fi
+            
+            echo "Got fresh download URL, starting download..."
+            if wget -O linz-vector-tiles.mbtiles "$DOWNLOAD_URL"; then
               break
             fi
+            
             RETRY=$((RETRY+1))
             [ $RETRY -lt $MAX_RETRIES ] && sleep 10
           done
